@@ -39,6 +39,14 @@ class ChatRowsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "line 2"):
             chat_rows.convert([line("m1"), json.dumps({"spoken": "x"}) + "\n"], "S")
 
+    def test_prompt_file_has_the_marker_and_the_app_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "prompt.txt"
+            chat_rows.main(["--write-prompt-file", str(target)])
+            text = target.read_text()
+        self.assertTrue(text.startswith("--- system turn ---\n"))
+        self.assertIn(chat_rows.app_prompt(), text)
+
     def test_command_line_writes_both_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "in.jsonl"

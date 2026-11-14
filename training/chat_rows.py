@@ -2,6 +2,7 @@
 """Turn rows of spoken text and typed targets into the train and validation files the trainer reads.
 
     python3 training/chat_rows.py IN.jsonl OUT_DIR [--valid-fraction 0.1] [--group-key meeting] [--seed 7]
+    python3 training/chat_rows.py --write-prompt-file PROMPT.txt
 
 IN is JSON lines with a `spoken` and a `typed` field on every row, for example the licence-filtered
 `*.accepted.jsonl` file that scripts/retrain_writer.py writes. Each row becomes
@@ -17,6 +18,9 @@ from the row or from its `meta`) land on the same side, so no recording is in bo
 held out for validation are the first ones in a stable hash order of (seed, group). A row without the
 group key is its own group. A row without both text fields stops the run with its line number.
 Nothing is dropped silently.
+
+`--write-prompt-file` writes the app's cleanup prompt in the layout `murmur-eval intent-run --system`
+reads, so an evaluation uses exactly the prompt the rows were trained with.
 """
 
 import argparse
@@ -85,12 +89,20 @@ def write(path: Path, rows: list[dict]) -> None:
 
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("input", type=Path)
-    parser.add_argument("out_dir", type=Path)
+    parser.add_argument("input", type=Path, nargs="?")
+    parser.add_argument("out_dir", type=Path, nargs="?")
+    parser.add_argument("--write-prompt-file", type=Path)
     parser.add_argument("--valid-fraction", type=float, default=0.1)
     parser.add_argument("--group-key", default="meeting")
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args(argv)
+    if args.write_prompt_file:
+        args.write_prompt_file.parent.mkdir(parents=True, exist_ok=True)
+        args.write_prompt_file.write_text(f"--- system turn ---\n{app_prompt()}\n", encoding="utf-8")
+        print(f"prompt -> {args.write_prompt_file}")
+        return
+    if args.input is None or args.out_dir is None:
+        parser.error("give IN.jsonl and OUT_DIR, or --write-prompt-file")
     if not 0 < args.valid_fraction < 1:
         sys.exit("error: --valid-fraction must be between 0 and 1")
     try:
