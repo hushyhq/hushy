@@ -32,48 +32,57 @@ Targets are the human annotators' own linked records in AMI and ICSI (both CC BY
 model-written labels are used.
 
 ```bash
+export HUSHY_MEETING_PUBLIC=1                       # set for every command below
+export HUSHY_TOKENIZER_DIR=/path/to/qwen3.5-tokenizer-folder
 PY="$(scripts/finetune/venv.sh)"
-HUSHY_MEETING_PUBLIC=1 scripts/meeting-extract/download.sh      # AMI and ICSI text only
+scripts/meeting-extract/download.sh                 # AMI and ICSI text only
 "$PY" scripts/meeting-extract/build_nxt.py ami
 "$PY" scripts/meeting-extract/build_nxt.py icsi
-"$PY" scripts/meeting-extract/assemble.py
-"$PY" scripts/meeting-extract/build_sft.py --public               # .build/public-data/meeting-extract/sft-public/
+"$PY" scripts/meeting-extract/assemble.py           # no arguments; also writes Evals/meeting-extract/{manifest.json,STATS.md}, do not commit them
+"$PY" scripts/meeting-extract/build_sft.py --public # .build/public-data/meeting-extract/sft-public/
 python scripts/finetune/cuda/train_cuda.py --config training/configs/meeting-extract-public.yaml   # on a CUDA box
 ```
 
 `build_sft.py --public` keeps only AMI and ICSI rows that are commercial-safe and have human
 targets, and splits by whole meeting team, so no team is in both train and validation.
 (`scripts/meeting-extract/leakage_check.py` is the maintainers' check against their private
-evaluation sets; it needs those sets and does not apply to the public recipe.) Set
-`HUSHY_TOKENIZER_DIR` to any Qwen3.5 tokenizer folder; it is used to measure row length.
+evaluation sets; it needs those sets and does not apply to the public recipe.)
 
 ## Public recipe 2: dictation cleanup
 
-Turns the recogniser's text into the text a person would have typed, keeping the meaning.
+Turns the recogniser's text into the text a person would have typed, keeping the meaning. Inputs are
+real spoken text from commercial-safe corpora. Targets come from a teacher model you choose.
 
-1. **Collect spoken-side text** from commercial-safe sources only. The source table is
-   `configs/cleanup-public-sources.json`. Readers for AMI and ICSI are in
-   `scripts/retrain_corpora.py`; `scripts/retrain_longform_sources.py` reads other long-form
-   corpora. Give every row a `source` field.
-2. **Index the benchmarks.** `scripts/retrain_public_rows.py benchmark-index` hashes the text of
-   the public benchmarks you evaluate on (hashes, never text), so that `assemble --exclude-index`
-   in step 5 drops any training row that repeats one. `assemble` also screens every added source
-   (`scripts/retrain_public_screen.py`): malformed, empty, repeated or implausible rows are dropped
-   and counted.
-3. **Write targets with a teacher you choose.** `scripts/retrain_writer.py` asks a model to write
-   the typed version of each passage and runs the automatic checks. It reads your own Anthropic key
-   from `~/.config/hushy/anthropic_api_key`, and has a dry run, a spend cap and a quarantine for
-   rows that look wrong. Read your provider's terms on using its outputs to train a model first.
-4. **Filter by licence.**
-   `python3 -I scripts/finetune/licence_filter.py --sources training/configs/cleanup-public-sources.json rows.jsonl kept.jsonl --report licence-report.json`
-5. **Assemble** train and validation files with `scripts/retrain_public_rows.py assemble`. It
-   writes a manifest with the held-out proof the trainer checks.
-6. **Train**: `python scripts/finetune/cuda/train_cuda.py --config training/configs/cleanup-public.yaml`.
-7. **Convert and evaluate**: `scripts/finetune/cuda/merge.py`, then `scripts/finetune/convert_mlx.sh`
-   for the 4-bit MLX model the app runs, then `murmur-eval` with `--backend mlx --mlx-model <dir>`
-   on the public benchmarks (Evals/README.md).
+1. **Get a corpus.** `scripts/meeting-extract/download.sh` fetches AMI to
+   `Evals/runs/public/ami/extracted`. No script here fetches the ICSI original transcripts that the
+   `icsi` reader needs.
+2. **Cut passages.**
+   `python3 scripts/retrain_longform.py stretches --source ami --input Evals/runs/public/ami/extracted --out .build/public-data/cleanup-work/passages.jsonl`
+3. **Hold out whole meetings.**
+   `python3 scripts/retrain_longform.py split --input ...passages.jsonl --train ...train-passages.jsonl --held-back ...valid-passages.jsonl`
+4. **Write targets with a teacher.** `scripts/retrain_writer.py write` has a dry run, a spend cap and
+   a quarantine for rows that look wrong. It reads your own Anthropic key from
+   `~/.config/hushy/anthropic_api_key` and only reads and writes under `Evals/` or `--scratch-dir`.
+   Read your provider's terms on using its outputs to train a model first.
+5. **Filter by licence.**
+   `python3 scripts/finetune/licence_filter.py --sources training/configs/cleanup-public-sources.json written.accepted.jsonl kept.jsonl --report licence-report.json`
+6. **Make the training files.**
+   `python3 training/chat_rows.py kept.jsonl .build/public-data/cleanup-public --valid-fraction 0.1`
+   builds the chat rows from the app's own prompt and splits them by meeting.
+7. **Train.** `python scripts/finetune/cuda/train_cuda.py --config training/configs/cleanup-public.yaml`.
 
-The prompts the models are trained with are in `Evals/finetune-prompts/`.
+`scripts/retrain_public_rows.py assemble` is not part of this recipe: it needs a base set that is not
+in this repository, so there is no automatic benchmark-overlap filter. Keep your test sets apart from
+your sources yourself.
+
+Step-by-step pages with expected output are at https://docs.tryhushy.com/train/overview/.
+
+## Convert and evaluate
+
+On the CUDA box, `python scripts/finetune/cuda/merge.py --config <the config you trained with>`
+writes `merged/` beside `adapter/`. On the Mac, `scripts/finetune/convert_mlx.sh <merged-dir> <out-dir>`
+makes the 4-bit MLX model. `python3 training/chat_rows.py --write-prompt-file prompt.txt` writes the
+training prompt in the layout `murmur-eval intent-run --system` reads.
 
 ## What you need
 
@@ -84,5 +93,6 @@ The prompts the models are trained with are in `Evals/finetune-prompts/`.
 
 ## Status
 
-The public configs were written for this release and have not yet been run end to end from a fresh
-checkout. The individual scripts are the ones the maintainers use. Report problems in an issue.
+The public configs were written for this release. The data steps were run on a Mac, and the
+cleanup steps through the licence filter and `chat_rows.py` were run with placeholder targets. Neither
+config has been trained end to end from a fresh checkout. Report problems in an issue.
