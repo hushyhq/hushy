@@ -155,6 +155,8 @@ class TrainIndex:
         grams = self._grams(ids)
         if not len(grams):
             return 0, 0
+        if not len(self.hashes):
+            return 0, len(grams)
         pos = np.searchsorted(self.hashes, grams)
         pos[pos >= len(self.hashes)] = 0
         return int((self.hashes[pos] == grams).sum()), len(grams)

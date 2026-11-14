@@ -31,6 +31,17 @@ ICSI_ROOT = DATA_ROOT / "raw/icsi-plus/x/ICSIplus"
 SCORECARD_SETS = Path(os.environ.get("HUSHY_MEETING_SETS", REPO / ".build/meetings-hillclimb/sets"))
 SCRIPT_CONTAMINATION = SCORECARD_SETS / "contamination.tsv"
 INDEX_CACHE = DATA_ROOT / "cache/trainindex"
+# The public recipe (HUSHY_MEETING_PUBLIC=1) runs without the maintainers' evaluation sets: when one of
+# those files is absent there, nothing is held out for it. Without the variable a missing file is an error.
+PUBLIC_RECIPE = os.environ.get("HUSHY_MEETING_PUBLIC") == "1"
+
+
+def maintainer_file(path: Path) -> Path | None:
+    """`path`, or None when the public recipe runs on a checkout that does not have it."""
+    if PUBLIC_RECIPE and not path.exists():
+        print(f"note: {path} is absent; the public recipe holds out nothing for it", file=sys.stderr)
+        return None
+    return path
 
 OWNER_PATTERNS = [
     ("Project Manager", r"project manager|\bpm\b"),
@@ -64,7 +75,10 @@ def ami_meetings() -> dict:
 def scorecard_ids() -> set:
     ids = set()
     for name in ("ami-dev", "ami-test", "ami-long"):
-        for m in json.load(open(SCORECARD_SETS / f"{name}.json"))["meetings"]:
+        path = maintainer_file(SCORECARD_SETS / f"{name}.json")
+        if path is None:
+            continue
+        for m in json.load(open(path))["meetings"]:
             ids.add(m["id"])
     return ids
 
@@ -172,7 +186,8 @@ def run_ami(index: TrainIndex, out: Path) -> None:
     scorecard = scorecard_ids()
     scorecard_series = {series_of(m) for m in scorecard}
     script_hits = {}
-    for line in open(SCRIPT_CONTAMINATION).read().splitlines()[1:]:
+    contamination = maintainer_file(SCRIPT_CONTAMINATION)
+    for line in (open(contamination).read().splitlines()[1:] if contamination else []):
         m, h, _ = line.split("\t")
         script_hits[m] = int(h)
     rows, exclusions, dropped = [], [], Counter()
@@ -207,7 +222,8 @@ def run_ami(index: TrainIndex, out: Path) -> None:
 def run_icsi(index: TrainIndex, out: Path) -> None:
     base = ICSI_ROOT / "Contributions/Summarization"
     rows, exclusions, dropped = [], [], Counter()
-    long_eval = set(json.load(open(ICSI_LONG_EVAL)))
+    long_eval_file = maintainer_file(ICSI_LONG_EVAL)
+    long_eval = set(json.load(open(long_eval_file))) if long_eval_file else set()
     for path in sorted((base / "abstractive").glob("*.abssumm.xml")):
         mid = path.name.split(".")[0]
         if mid in long_eval:
