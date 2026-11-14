@@ -4,8 +4,8 @@
     python3 -I scripts/finetune/licence_filter.py --sources SOURCES.json IN.jsonl OUT.jsonl [--report REPORT.json]
 
 SOURCES.json maps a source name to its licence: {"sources": {"ami": {"licence": "CC-BY-4.0",
-"commercial_safe": true, "attribution": "..."}, ...}}. Every input row must name its source in a top-level
-`source` field. A row is kept only when its source is listed with `commercial_safe: true`; an unlisted source, a
+"commercial_safe": true, "attribution": "..."}, ...}}. Every input row must name its source in a `source` field,
+top level or inside `meta` (where scripts/retrain_writer.py keeps it). A row is kept only when its source is listed with `commercial_safe: true`; an unlisted source, a
 missing `source` field or `commercial_safe: false` drops the row (fail closed). Kept rows gain `licence` and
 `commercial_safe` fields, so every row of the output says where it came from. The report counts kept and dropped
 rows per source and lists the attributions the model card owes.
@@ -30,9 +30,17 @@ def load_sources(path: Path) -> dict:
     return sources
 
 
+def source_of(row: dict):
+    """The row's `source`: top level, else inside `meta`."""
+    if row.get("source") is not None:
+        return row["source"]
+    meta = row.get("meta")
+    return meta.get("source") if isinstance(meta, dict) else None
+
+
 def decide(row: dict, sources: dict) -> tuple[dict | None, str]:
     """(tagged row, reason) for a kept row; (None, reason) for a dropped one."""
-    name = row.get("source")
+    name = source_of(row)
     if not isinstance(name, str) or not name:
         return None, "no source field"
     entry = sources.get(name)
@@ -52,7 +60,7 @@ def run(sources: dict, lines, out) -> dict:
         if not isinstance(row, dict):
             raise ValueError(f"line {number}: expected a JSON object")
         tagged, reason = decide(row, sources)
-        source = row.get("source") if isinstance(row.get("source"), str) else "<none>"
+        source = source_of(row) if isinstance(source_of(row), str) and source_of(row) else "<none>"
         if tagged is None:
             dropped[(source, reason)] += 1
             continue

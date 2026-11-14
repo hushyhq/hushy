@@ -25,6 +25,16 @@ def rows(*items: dict) -> list[str]:
 
 
 class LicenceFilterTests(unittest.TestCase):
+    def test_reads_source_from_meta_where_the_writer_keeps_it(self) -> None:
+        out = io.StringIO()
+        report = licence_filter.run(SOURCES, rows(
+            {"id": "a", "meta": {"source": "ami"}},
+            {"id": "b", "meta": {"source": "gyafc"}},
+            {"id": "c", "meta": "not a dict"},
+        ), out)
+        self.assertEqual(report["kept"], {"ami": 1})
+        self.assertEqual([json.loads(line)["id"] for line in out.getvalue().splitlines()], ["a"])
+
     def test_keeps_and_tags_only_commercial_safe_sources(self) -> None:
         out = io.StringIO()
         report = licence_filter.run(SOURCES, rows(
