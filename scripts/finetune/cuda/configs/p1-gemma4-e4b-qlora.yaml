@@ -1,0 +1,15 @@
+# p1 on Gemma 4 E4B (base arm): the p1 training set unchanged (../data-p1), only the base model differs
+# from p1-qwen3.5-4b-qlora. Why: stock Gemma 4 E4B, simply asked, kept every fact in 15 of 16 dev passages
+# (the 2B pilot: 7) but read as typed 3.2 to 3.6 of 5 (the pilot: 4.4 to 4.6), measured 2026-10-10. The
+# question this run answers: does the same data give E4B the pilot's readability without losing its facts.
+# Base is Google's QAT checkpoint (half precision, trained to be run at 4 bits). QLoRA (NF4 base) because
+# the card has 12 GB; batch 1 x accum 16 as on the Qwen 4B arm.
+base_model: google/gemma-4-E4B-it-qat-q4_0-unquantized
+data_dir: ../data-p1
+output_dir: runs/p1-gemma4-e4b-qlora
+quantization: 4bit
+kbit_fp32_cast: false   # the unquantised embedding tables do not fit 12 GB in float32
+# Adapters on the language model only: the vision and audio towers use a wrapped linear layer that
+# LoRA cannot attach to, and they are not used for text.
+lora: {rank: 32, alpha: 64, dropout: 0.05, target_modules: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)'}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 7}

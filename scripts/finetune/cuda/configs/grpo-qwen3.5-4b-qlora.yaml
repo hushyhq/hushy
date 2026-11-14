@@ -1,0 +1,15 @@
+base_model: ~/hushy-train/cuda/runs/r4d-qwen3.5-4b-qlora/merged
+data_dir: ~/hushy-train/grpo-data
+output_dir: ~/hushy-train/cuda/runs/r5grpo-qwen3.5-4b-qlora
+seed: 7
+selection_threshold: 3.0
+selection_max_new_tokens: 160
+num_generations: 4
+max_prompt_length: 384
+max_completion_length: 256
+max_reference_tokens: 200
+rank: 16
+gradient_accumulation_steps: 4
+learning_rate: 5.0e-6
+beta: 0.02
+max_steps: 100

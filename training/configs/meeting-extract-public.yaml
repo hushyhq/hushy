@@ -1,0 +1,12 @@
+# Public recipe: the meeting-extract adapter (decisions, actions, open questions and changes from a meeting chunk).
+# Data: AMI and ICSI only (CC BY 4.0, attribution owed), the annotators' own linked records as targets; no
+# model-written labels. Build it with `scripts/meeting-extract/build_sft.py --public` (training/README.md).
+# Run from the repository root: python scripts/finetune/cuda/train_cuda.py --config <this file>.
+# Trainer: scripts/finetune/cuda/train_cuda.py on one CUDA GPU with about 24 GB (QLoRA). Not the maintainers'
+# shipped adapter: that one starts from their fine-tuned cleanup model and adds teacher-labelled rows.
+base_model: Qwen/Qwen3.5-4B
+data_dir: .build/public-data/meeting-extract/sft-public
+output_dir: .build/runs/meeting-extract-public-qwen3.5-4b
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.0}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 8, max_seq_length: 6144, answer_only_logits: true, patience: 3, seed: 7, max_valid_rows: 400, eval_steps: 20}

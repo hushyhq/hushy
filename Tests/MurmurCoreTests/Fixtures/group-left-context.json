@@ -1,0 +1,134 @@
+[
+  {
+    "previous": null,
+    "context": "none"
+  },
+  {
+    "previous": "",
+    "context": "none"
+  },
+  {
+    "previous": " ",
+    "context": "none"
+  },
+  {
+    "previous": "Hello.",
+    "context": "Hello."
+  },
+  {
+    "previous": "One short sentence.",
+    "context": "One short sentence."
+  },
+  {
+    "previous": "No final punctuation",
+    "context": "No final punctuation"
+  },
+  {
+    "previous": "First. Second.",
+    "context": "First. Second."
+  },
+  {
+    "previous": "Alpha beta gamma. Short end.",
+    "context": "Alpha beta gamma. Short end."
+  },
+  {
+    "previous": "word0 word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24 word25 word26 word27 word28 word29.",
+    "context": "word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24 word25 word26 word27 word28 word29."
+  },
+  {
+    "previous": "  trailing whitespace.   ",
+    "context": "trailing whitespace."
+  },
+  {
+    "previous": "A quote ends here.\"",
+    "context": "A quote ends here.\""
+  },
+  {
+    "previous": "A bracket ends here.)",
+    "context": "A bracket ends here.)"
+  },
+  {
+    "previous": "Question?",
+    "context": "Question?"
+  },
+  {
+    "previous": "Excited!",
+    "context": "Excited!"
+  },
+  {
+    "previous": "One.\nTwo.",
+    "context": "One. Two."
+  },
+  {
+    "previous": "one!\tsecond?",
+    "context": "one! second?"
+  },
+  {
+    "previous": "one.two",
+    "context": "one.two"
+  },
+  {
+    "previous": "one.  two",
+    "context": "one. two"
+  },
+  {
+    "previous": "a b c d e f g h i j k l m n o. tail.",
+    "context": "a b c d e f g h i j k l m n o. tail."
+  },
+  {
+    "previous": "a b c d e f g h i j k l m n o p q r s t u v w x y z.",
+    "context": "b c d e f g h i j k l m n o p q r s t u v w x y z."
+  },
+  {
+    "previous": "  first sentence. second one  ",
+    "context": "first sentence. second one"
+  },
+  {
+    "previous": "unicode café. Voilà!",
+    "context": "unicode café. Voilà!"
+  },
+  {
+    "previous": "line one\nline two",
+    "context": "line one line two"
+  },
+  {
+    "previous": "First?! Last.",
+    "context": "First?! Last."
+  },
+  {
+    "previous": "He said \"go.\"",
+    "context": "He said \"go.\""
+  },
+  {
+    "previous": "Nested [end.]",
+    "context": "Nested [end.]"
+  },
+  {
+    "previous": "A long final sentence with many ordinary words and a punctuation mark in the middle but no final period",
+    "context": "A long final sentence with many ordinary words and a punctuation mark in the middle but no final period"
+  },
+  {
+    "previous": "a b. c",
+    "context": "a b. c"
+  },
+  {
+    "previous": "one\u001ctwo. three.",
+    "context": "one two. three."
+  },
+  {
+    "previous": "\u001c\u001done two.",
+    "context": "one two."
+  },
+  {
+    "previous": "alpha.\u001cbeta",
+    "context": "alpha. beta"
+  },
+  {
+    "previous": "alphabeta. gamma",
+    "context": "alpha beta. gamma"
+  },
+  {
+    "previous": "alpha beta. gamma",
+    "context": "alpha beta. gamma"
+  }
+]

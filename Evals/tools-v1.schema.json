@@ -1,0 +1,489 @@
+{
+  "single_step" : true,
+  "tools" : [
+    {
+      "description" : "Create a reminder in Apple Reminders for the speaker (\"remind me to…\", \"don't let me forget…\").",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "list" : {
+            "description" : "Reminders list name if spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "title" : {
+            "description" : "What to be reminded about, in the speaker's words, without the date phrase",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "when" : {
+            "description" : "Date/time phrase exactly as spoken, if any",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "datetime"
+          }
+        },
+        "required" : [
+          "title"
+        ],
+        "type" : "object"
+      },
+      "name" : "create_reminder",
+      "risk" : "local"
+    },
+    {
+      "description" : "Add an event to the speaker's own Mac calendar. Attendees are only noted on the event; to send invitations use propose_calendar_invite.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "attendees" : {
+            "description" : "People named as joining, as spoken",
+            "items" : {
+              "type" : "string"
+            },
+            "minItems" : 1,
+            "type" : "array",
+            "x-match" : "name_list"
+          },
+          "calendar" : {
+            "description" : "Calendar name if stated",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "duration_minutes" : {
+            "description" : "Length in minutes if stated",
+            "maximum" : 1440,
+            "minimum" : 5,
+            "type" : "integer",
+            "x-match" : "duration_minutes"
+          },
+          "location" : {
+            "description" : "Place if stated",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "title" : {
+            "description" : "Short event title in the speaker's words, without the date phrase",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "when" : {
+            "description" : "Start date/time phrase exactly as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "datetime"
+          }
+        },
+        "required" : [
+          "title",
+          "when"
+        ],
+        "type" : "object"
+      },
+      "name" : "create_event",
+      "risk" : "local"
+    },
+    {
+      "description" : "Add one or more items to a named Reminders list (\"add eggs milk and bread to groceries\").",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "items" : {
+            "description" : "Each item separately, as spoken",
+            "items" : {
+              "type" : "string"
+            },
+            "minItems" : 1,
+            "type" : "array",
+            "x-match" : "text_list"
+          },
+          "list" : {
+            "description" : "The list name as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          }
+        },
+        "required" : [
+          "items",
+          "list"
+        ],
+        "type" : "object"
+      },
+      "name" : "add_to_list",
+      "risk" : "local"
+    },
+    {
+      "description" : "Save a new Hushy note with the dictated text.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "text" : {
+            "description" : "The note body, as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "title" : {
+            "description" : "A title if the speaker gave one",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          }
+        },
+        "required" : [
+          "text"
+        ],
+        "type" : "object"
+      },
+      "name" : "save_note",
+      "risk" : "local"
+    },
+    {
+      "description" : "Open an app, website or service link after confirmation.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "action" : {
+            "description" : "Link action",
+            "enum" : [
+              "open",
+              "search",
+              "compose",
+              "day",
+              "directions",
+              "channel",
+              "repo",
+              "issues",
+              "pulls"
+            ],
+            "type" : "string",
+            "x-match" : "enum"
+          },
+          "browser" : {
+            "description" : "Preferred browser",
+            "enum" : [
+              "default",
+              "safari",
+              "chrome",
+              "arc",
+              "firefox",
+              "edge",
+              "brave"
+            ],
+            "type" : "string",
+            "x-match" : "enum"
+          },
+          "date" : {
+            "description" : "Day phrase as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "datetime"
+          },
+          "destination" : {
+            "description" : "Directions destination",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "query" : {
+            "description" : "Search text or owner/repo",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "service" : {
+            "description" : "Named service",
+            "enum" : [
+              "gmail",
+              "google_calendar",
+              "google_maps",
+              "google",
+              "youtube",
+              "slack",
+              "github",
+              "notion"
+            ],
+            "type" : "string",
+            "x-match" : "enum"
+          },
+          "target" : {
+            "description" : "App, website or service as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          }
+        },
+        "required" : [
+          "target"
+        ],
+        "type" : "object"
+      },
+      "name" : "open_app",
+      "risk" : "local"
+    },
+    {
+      "description" : "Run one of the speaker's existing Apple Shortcuts by name.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "input" : {
+            "description" : "Text to pass to the Shortcut, if spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "name" : {
+            "description" : "The Shortcut name as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          }
+        },
+        "required" : [
+          "name"
+        ],
+        "type" : "object"
+      },
+      "name" : "run_shortcut",
+      "risk" : "automation"
+    },
+    {
+      "description" : "Start a countdown timer on the Mac.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "duration" : {
+            "description" : "The length as spoken, e.g. \"20 minutes\"",
+            "type" : [
+              "string",
+              "integer"
+            ],
+            "x-match" : "duration"
+          },
+          "label" : {
+            "description" : "What the timer is for, if spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          }
+        },
+        "required" : [
+          "duration"
+        ],
+        "type" : "object"
+      },
+      "name" : "set_timer",
+      "risk" : "local"
+    },
+    {
+      "description" : "Propose an email draft the speaker reviews and sends themselves. Never sends.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "body" : {
+            "description" : "What the email should say, in the speaker's words",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "subject" : {
+            "description" : "Subject if spoken or obvious",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "to" : {
+            "description" : "Recipients as spoken (names or addresses); the card resolves contacts",
+            "items" : {
+              "type" : "string"
+            },
+            "minItems" : 1,
+            "type" : "array",
+            "x-match" : "name_list"
+          }
+        },
+        "required" : [
+          "to",
+          "body"
+        ],
+        "type" : "object"
+      },
+      "name" : "propose_email_draft",
+      "risk" : "connected_draft"
+    },
+    {
+      "description" : "Propose a chat message pre-filled in Slack, Messages, WhatsApp or Teams for the speaker to send. Never posts.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "channel" : {
+            "description" : "Which app; the frontmost app decides when the speaker doesn't say",
+            "enum" : [
+              "slack",
+              "imessage",
+              "whatsapp",
+              "teams",
+              "discord"
+            ],
+            "type" : "string",
+            "x-match" : "enum"
+          },
+          "recipient" : {
+            "description" : "Person, group or #channel as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "text" : {
+            "description" : "The message, in the speaker's words",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          }
+        },
+        "required" : [
+          "channel",
+          "recipient",
+          "text"
+        ],
+        "type" : "object"
+      },
+      "name" : "propose_message",
+      "risk" : "connected_draft"
+    },
+    {
+      "description" : "Propose a new issue or ticket in the speaker's tracker; their agent creates it after the card.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "description" : {
+            "description" : "Extra detail if spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "project" : {
+            "description" : "Project, team, board or repository if spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "title" : {
+            "description" : "Issue title in the speaker's words",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "tracker" : {
+            "description" : "The tracker named, or the frontmost one",
+            "enum" : [
+              "linear",
+              "jira",
+              "github",
+              "notion",
+              "asana"
+            ],
+            "type" : "string",
+            "x-match" : "enum"
+          }
+        },
+        "required" : [
+          "tracker",
+          "title"
+        ],
+        "type" : "object"
+      },
+      "name" : "propose_issue",
+      "risk" : "connected_draft"
+    },
+    {
+      "description" : "Propose a meeting invitation sent to other people from the speaker's calendar account, after the card.",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "attendees" : {
+            "description" : "Invitees as spoken (names or addresses)",
+            "items" : {
+              "type" : "string"
+            },
+            "minItems" : 1,
+            "type" : "array",
+            "x-match" : "name_list"
+          },
+          "duration_minutes" : {
+            "description" : "Length in minutes if stated",
+            "maximum" : 1440,
+            "minimum" : 5,
+            "type" : "integer",
+            "x-match" : "duration_minutes"
+          },
+          "location" : {
+            "description" : "Place or meeting link if stated",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "name"
+          },
+          "notes" : {
+            "description" : "Agenda or body if spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "title" : {
+            "description" : "Meeting title in the speaker's words",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "text"
+          },
+          "when" : {
+            "description" : "Start date/time phrase exactly as spoken",
+            "minLength" : 1,
+            "type" : "string",
+            "x-match" : "datetime"
+          }
+        },
+        "required" : [
+          "title",
+          "when",
+          "attendees"
+        ],
+        "type" : "object"
+      },
+      "name" : "propose_calendar_invite",
+      "risk" : "connected_draft"
+    },
+    {
+      "description" : "Do nothing: the utterance is dictation, a mention, chit-chat, or a request to refuse (sensitive, unsupported, ambiguous or more than one action).",
+      "input_schema" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "reason" : {
+            "description" : "Why no tool runs",
+            "enum" : [
+              "not_a_command",
+              "needs_clarification",
+              "multi_intent",
+              "sensitive_content",
+              "unsupported"
+            ],
+            "type" : "string",
+            "x-match" : "enum"
+          }
+        },
+        "required" : [
+          "reason"
+        ],
+        "type" : "object"
+      },
+      "name" : "no_action",
+      "risk" : "none"
+    }
+  ],
+  "version" : "tools-v1"
+}

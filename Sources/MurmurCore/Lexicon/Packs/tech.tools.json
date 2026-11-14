@@ -1,0 +1,9 @@
+{
+"id": "tech.tools",
+"version": "stub",
+"title": "Developer tools and frameworks (stub)",
+"licence": "CC0-1.0",
+"sourceURL": "https://www.wikidata.org/",
+"sourceNote": "Chosen source, not built yet: Wikidata items that are instances of software framework (Q271680), programming language (Q9143) or free software (Q341), ranked by sitelinks (Wikidata data is CC0 1.0).",
+"terms": []
+}

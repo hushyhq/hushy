@@ -1,0 +1,9 @@
+# Round 3 on the chosen base (2026-10-11): p1 + agreed corrections + 1,200 long rows re-cut with the fixed
+# tool (AMI, Earnings-22, ICSI outside the reserved series), ../data-p1-r3. Settings as bothv2 on the 4B, so
+# the only change from that run is the long rows.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-p1-r3
+output_dir: runs/r3-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 7}

@@ -1,0 +1,12 @@
+# Voice actions (tools-v1) on top of the 0.8B cleanup fine-tune — the 8 GB-Mac tier model.
+# base_model = that run's merged checkpoint on the box (v4 cleanup fine-tune, compact-v2). The data mixes ~75% tool calls with a ~25% cleanup replay so the
+# cleanup skill is kept; the cleanup dev sets must stay within 1 point of the base checkpoint.
+# Rows are ~1.5k tokens (tools prompt), so batch 1 x accum 16 (effective 16, no padding) with
+# logits only on the answer. Est. peak ~5 GB; est. ~45-60 min for 2 epochs (~16M tokens).
+base_model: runs/v4-qwen3.5-0.8b/merged
+data_dir: ../data-tools
+output_dir: runs/qwen3.5-0.8b-tools
+quantization: none
+lora: {rank: 16, alpha: 32, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.5e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1792,
+        answer_only_logits: true, max_valid_rows: 320, eval_steps: 100, patience: 3, seed: 7}

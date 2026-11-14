@@ -1,0 +1,22 @@
+{
+  "note": "One-way SHA-256 commitments to the maintainers' sealed evaluation sets. The sets are private; these hashes let the guards refuse a renamed copy and let anyone check later that a set was not changed. Results on sealed sets are published as totals only.",
+  "sets": [
+    {
+      "file": "actions-heldout.json",
+      "sha256": "4ab6d22af5c794fd8fcf7b9bc35e1816f515c90afd1e809904233e4d067c3040",
+      "cases": 303,
+      "format": "hushy.tool-eval/v1",
+      "catalog": "tools-v1",
+      "sealed": "2026-09-27",
+      "runner": "murmur-eval tools --heldout <path> (orchestrator only)"
+    },
+    {
+      "file": "meeting-heldout.json",
+      "sha256": "edea8757abb16279b97460e9dc5fa191c0c571a0af6312746396e678b28fd251",
+      "cases": 6,
+      "format": "hushy.meeting-eval/v1",
+      "sealed": "2026-09-28",
+      "runner": "murmur-eval meeting --heldout <path> (orchestrator only; aggregates only)"
+    }
+  ]
+}

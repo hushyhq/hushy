@@ -1,0 +1,17 @@
+# SMOKE — validates the box end to end in < 5 min on an RTX 4070 Super 12 GB (after the one-time
+# ~1.8 GB model download): 400 rows, 60 optimizer steps, then merge. Est. peak ~5 GB.
+base_model: Qwen/Qwen3.5-0.8B
+data_dir: ../data
+output_dir: runs/smoke-qwen3.5-0.8b
+quantization: none
+lora: {rank: 16, alpha: 32, dropout: 0.05}
+train:
+  epochs: 1
+  max_steps: 60
+  max_train_rows: 400
+  learning_rate: 2.0e-4
+  batch_size: 4
+  grad_accumulation_steps: 2
+  eval_steps: 30
+  max_seq_length: 512
+  seed: 7

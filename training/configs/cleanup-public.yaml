@@ -1,0 +1,11 @@
+# Public recipe: the dictation cleanup model (spoken text in, the text a person would have typed out).
+# Data: commercial-safe sources only (cleanup-public-sources.json), filtered row by row with
+# scripts/finetune/licence_filter.py, plus targets from a teacher you choose (training/README.md, step 3).
+# Run from the repository root: python scripts/finetune/cuda/train_cuda.py --config <this file>.
+# Trainer: scripts/finetune/cuda/train_cuda.py; QLoRA fits a 12 GB GPU at this sequence length.
+base_model: Qwen/Qwen3.5-4B
+data_dir: .build/public-data/cleanup-public
+output_dir: .build/runs/cleanup-public-qwen3.5-4b
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 2, grad_accumulation_steps: 8, max_seq_length: 1024, patience: 3, seed: 7}

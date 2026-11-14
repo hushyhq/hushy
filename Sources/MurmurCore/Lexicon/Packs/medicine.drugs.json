@@ -1,0 +1,9 @@
+{
+"id": "medicine.drugs",
+"version": "stub",
+"title": "Drug names (stub)",
+"licence": "CC0-1.0",
+"sourceURL": "https://open.fda.gov/apis/drug/ndc/",
+"sourceNote": "Chosen source, not built yet: openFDA NDC Directory brand and generic names (public domain, CC0 1.0 per https://open.fda.gov/license/). Build like sports.nba: rank by how many listings carry the name, keep names the shape filter accepts.",
+"terms": []
+}

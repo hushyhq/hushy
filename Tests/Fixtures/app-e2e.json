@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "scenarios": [
+    {"id":"short", "spoken":"I am gonna send the cobalt parcel tomorrow and we do not need the chart", "mustContain":["cobalt", "parcel", "chart"], "mustNotContain":[]},
+    {"id":"long-parts", "spoken":"The amber kite is ready for the invented fair. Its paper tail has three blue stars and one copper bell. The blue wagon will carry the kite past the painted gate. It also carries a folded map and a small green lantern. The silver cup goes on the table beside the gate. We can bring all three things tomorrow and leave the empty basket at home.", "parts":["The amber kite is ready for the invented fair. Its paper tail has three blue stars and one copper bell.","The blue wagon will carry the kite past the painted gate. It also carries a folded map and a small green lantern.","The silver cup goes on the table beside the gate. We can bring all three things tomorrow and leave the empty basket at home."], "mustContain":["amber kite", "blue wagon", "silver cup"], "mustNotContain":[]},
+    {"id":"correction", "spoken":"Meet by the painted gate on Tuesday no Wednesday", "mustContain":["Wednesday", "painted gate"], "mustNotContain":["Tuesday"], "needsModel":true},
+    {"id":"address", "spoken":"Send the sketch to luna at example dot test", "mustContain":["luna", "example"], "mustNotContain":[]},
+    {"id":"list", "spoken":"The basket needs three things first a copper bell second a paper crane third a green ribbon", "mustContain":["copper bell", "paper crane", "green ribbon"], "mustNotContain":[]},
+    {"id":"taught-word", "spoken":"Put the zindel in the paper box", "mustContain":["Zindle", "paper box"], "mustNotContain":[]},
+    {"id":"as-spoken", "spoken":"um I am gonna move the paper kite", "mustContain":["um", "gonna", "paper kite"], "mustNotContain":[]},
+    {"id":"tones", "spoken":"I am gonna move the paper kite and we do not need the bell", "mustContain":["paper kite", "bell"], "mustNotContain":[]},
+    {"id":"moved-group", "spoken":"I am gonna move the paper kite and we do not need the bell", "mustContain":["paper kite", "bell"], "mustNotContain":[]},
+    {"id":"no-focus", "spoken":"Leave the copper lantern by the invented gate", "mustContain":["copper lantern", "invented gate"], "mustNotContain":[]}
+  ]
+}

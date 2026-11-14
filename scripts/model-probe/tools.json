@@ -1,0 +1,248 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "create_event",
+   "description": "Create a calendar event on the user's Mac calendar. Use only when the user explicitly asks to add, schedule, book or put something on the calendar for themselves.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string",
+      "description": "Short event title in the user's words, without the date phrase"
+     },
+     "when": {
+      "type": "string",
+      "description": "The date/time phrase exactly as spoken, e.g. 'tomorrow at 3', 'next Friday 2:30 pm'"
+     },
+     "duration_minutes": {
+      "type": "integer",
+      "description": "Length in minutes if stated"
+     },
+     "location": {
+      "type": "string",
+      "description": "Place if stated"
+     },
+     "calendar": {
+      "type": "string",
+      "description": "Calendar name if stated"
+     }
+    },
+    "required": [
+     "title",
+     "when"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "create_reminder",
+   "description": "Create a reminder in Apple Reminders. Use when the user says remind me, don't let me forget, add to my to-do or task list.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string",
+      "description": "What to be reminded about, imperative, without the date phrase"
+     },
+     "when": {
+      "type": "string",
+      "description": "Date/time phrase as spoken, if any"
+     },
+     "list": {
+      "type": "string",
+      "description": "Reminders list name if stated, e.g. Groceries"
+     }
+    },
+    "required": [
+     "title"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_timer",
+   "description": "Start a countdown timer on the Mac.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "duration": {
+      "type": "string",
+      "description": "Duration phrase as spoken, e.g. '10 minutes'"
+     },
+     "label": {
+      "type": "string",
+      "description": "Optional label"
+     }
+    },
+    "required": [
+     "duration"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "run_shortcut",
+   "description": "Run a named Apple Shortcut the user already has.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Exact shortcut name as spoken"
+     },
+     "input": {
+      "type": "string",
+      "description": "Optional text input to pass"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "open_app",
+   "description": "Open or switch to a Mac application or a URL.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "target": {
+      "type": "string",
+      "description": "App name or URL as spoken"
+     }
+    },
+    "required": [
+     "target"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "draft_email",
+   "description": "Create an email DRAFT (never sends). The user reviews and presses Send.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "to": {
+      "type": "string",
+      "description": "Recipient name as spoken"
+     },
+     "subject": {
+      "type": "string",
+      "description": "Short subject"
+     },
+     "body": {
+      "type": "string",
+      "description": "Body text in the user's voice"
+     }
+    },
+    "required": [
+     "to",
+     "body"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "draft_message",
+   "description": "Create a chat message DRAFT for Messages or Slack (never sends).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "app": {
+      "type": "string",
+      "description": "Messages or Slack"
+     },
+     "to": {
+      "type": "string",
+      "description": "Person or channel as spoken"
+     },
+     "text": {
+      "type": "string",
+      "description": "Message text"
+     }
+    },
+    "required": [
+     "to",
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_notes",
+   "description": "Search the user's Hushy meeting notes and answer from them.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "What to look for"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "append_to_note",
+   "description": "Add text to an existing Hushy note.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "note": {
+      "type": "string",
+      "description": "Note title as spoken"
+     },
+     "text": {
+      "type": "string",
+      "description": "Text to add"
+     }
+    },
+    "required": [
+     "note",
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "escalate_to_agent",
+   "description": "Hand the request to the user's own coding/assistant agent (Claude Code or Codex). Use ONLY for multi-step tasks, anything needing the web, email reading, other accounts, or more than one tool.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "task": {
+      "type": "string",
+      "description": "The user's request restated as one clear instruction"
+     }
+    },
+    "required": [
+     "task"
+    ]
+   }
+  }
+ }
+]

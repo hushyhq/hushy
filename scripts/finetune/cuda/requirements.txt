@@ -1,0 +1,15 @@
+# Linux + NVIDIA GPU (CUDA 12.x). Install PyTorch first, matching your CUDA version:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+# then: pip install -r requirements.txt
+transformers>=5.17,<6      # Qwen3.5 (qwen3_5) support
+peft>=0.18,<1
+accelerate>=1.10
+datasets>=4.0
+safetensors>=0.6
+huggingface_hub>=0.35
+pyyaml>=6.0
+bitsandbytes>=0.48         # only for quantization: 4bit (QLoRA)
+# Optional but recommended for Qwen3.5 (Gated DeltaNet layers); without them transformers falls
+# back to a slower pure-PyTorch path:
+# flash-linear-attention
+# causal-conv1d

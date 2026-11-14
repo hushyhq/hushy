@@ -1,0 +1,12 @@
+# Voice actions (tools-v1) on top of the 2B cleanup fine-tune — the shipping candidate.
+# base_model = the 2B cleanup run's merged checkpoint on the box (v4, compact-v2). ~75% tool calls + ~25% cleanup replay (docs/product/FINETUNE.md "Voice actions
+# data v1"). Rank 32 as for cleanup: argument copying and the no_action boundary are the new skills.
+# batch 1 x accum 16 (effective 16), answer-only logits. Est. peak ~8 GB; est. ~80-100 min for
+# 2 epochs (~16M tokens at the 2B cleanup run's ~2.4k tokens/s, faster with answer-only logits).
+base_model: runs/v4-qwen3.5-2b/merged
+data_dir: ../data-tools
+output_dir: runs/qwen3.5-2b-tools
+quantization: none
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1792,
+        answer_only_logits: true, max_valid_rows: 320, eval_steps: 100, patience: 3, seed: 7}

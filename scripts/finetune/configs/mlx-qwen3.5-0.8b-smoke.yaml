@@ -1,0 +1,21 @@
+# Mac smoke run — validates train → fuse → Swift load, nothing more. Heavy training runs on the
+# CUDA box (../cuda). Measured on the M4 Pro while other work ran: 0.02–0.05 it/s at batch 4 and
+# a 14 GB peak (Qwen3.5's 248k vocabulary logits + Gated DeltaNet backward), so keep this tiny.
+fine_tune_type: lora
+train: true
+mask_prompt: true
+num_layers: 8
+batch_size: 2
+iters: 40
+val_batches: 4
+learning_rate: 2.0e-4
+steps_per_report: 10
+steps_per_eval: 40
+save_every: 40
+max_seq_length: 512
+grad_checkpoint: true
+seed: 7
+lora_parameters:
+  rank: 16
+  dropout: 0.05
+  scale: 2.0

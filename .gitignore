@@ -1,0 +1,27 @@
+.build/
+.swiftpm/
+build/
+*.xcodeproj/xcuserdata/
+.DS_Store
+Evals/data/
+.claude/worktrees/
+.claude/*.lock
+.claude/settings.local.json
+Evals/runs/
+# Invite-code signing key (docs/guide/INVITES.md): never in the repo, whatever its name.
+invite_signing_key
+*.invite-key
+__pycache__/
+FOUNDER-TODO.md
+
+# Wrangler local cache (account name/id)
+.wrangler/
+
+# Supabase CLI link state (project ref, pooler host); local to each machine
+supabase/.temp/
+
+# Agent-kit gate logs and gate-cleanup reports (scripts/gate.sh, scripts/gate-cleanup.sh)
+.gate-logs/
+
+# Model keys written by hushy-model-seal (docs/engineering/SEALED-MODELS.md): never committed.
+.secrets/

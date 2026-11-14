@@ -1,0 +1,12 @@
+# p1 on Gemma 4 E2B: the p1 training set unchanged (../data-p1). Started 2026-10-10 because the E4B arm
+# does not fit the 12 GB card (8.66 GiB once loaded, out of memory on the first step) and the card was idle.
+# Stock E2B, simply asked: every fact intact in 11 of 16 dev passages, reads as typed 2.75 of 5.
+base_model: google/gemma-4-E2B-it-qat-q4_0-unquantized
+data_dir: ../data-p1-long3
+output_dir: runs/p1-gemma4-e2b-long3
+quantization: 4bit
+kbit_fp32_cast: false   # the unquantised embedding tables do not fit 12 GB in float32
+# Adapters on the language model only: the vision and audio towers use a wrapped linear layer that
+# LoRA cannot attach to, and they are not used for text.
+lora: {rank: 32, alpha: 64, dropout: 0.05, target_modules: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)'}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 7}

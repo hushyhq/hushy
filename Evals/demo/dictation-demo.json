@@ -1,0 +1,14 @@
+[
+  {"id": "demo-01", "tag": "fillers", "spoken": "um so I think we should uh move the meeting to thursday", "expected": "So I think we should move the meeting to Thursday."},
+  {"id": "demo-02", "tag": "self-correction", "spoken": "send it to the design team no actually the product team", "expected": "Send it to the product team."},
+  {"id": "demo-03", "tag": "numbers", "spoken": "the budget is twelve thousand five hundred dollars for the quarter", "expected": "The budget is $12,500 for the quarter."},
+  {"id": "demo-04", "tag": "question", "spoken": "can you check whether the build passed last night", "expected": "Can you check whether the build passed last night?"},
+  {"id": "demo-05", "tag": "negation", "spoken": "we are not shipping the beta this week", "expected": "We are not shipping the beta this week."},
+  {"id": "demo-06", "tag": "repetition", "spoken": "I I think the the second option is better", "expected": "I think the second option is better."},
+  {"id": "demo-07", "tag": "uncertainty", "spoken": "I'm not sure but it might be ready by friday", "expected": "I'm not sure, but it might be ready by Friday."},
+  {"id": "demo-08", "tag": "names", "spoken": "ask priya and marcus to review the draft", "expected": "Ask Priya and Marcus to review the draft."},
+  {"id": "demo-09", "tag": "times", "spoken": "let's meet at three thirty pm tomorrow", "expected": "Let's meet at 3:30 PM tomorrow.", "alternatives": ["Let's meet at 3:30 p.m. tomorrow."]},
+  {"id": "demo-10", "tag": "clean", "spoken": "Thanks for the update.", "expected": "Thanks for the update."},
+  {"id": "demo-11", "tag": "fillers", "spoken": "you know the the report is basically done", "expected": "The report is basically done."},
+  {"id": "demo-12", "tag": "percent", "spoken": "sign-ups grew by fifteen percent in october", "expected": "Sign-ups grew by 15% in October."}
+]

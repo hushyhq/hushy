@@ -1,0 +1,21 @@
+# One bounded adaptation: 282 unique train rows, exactly two epochs, seed17.
+# Completion-only JSON targets under the runtime whole-text v1 contract.
+# Evaluation fixtures are never training targets. No automatic model promotion.
+fine_tune_type: lora
+train: true
+mask_prompt: true
+num_layers: 4
+batch_size: 1
+iters: 564
+val_batches: 56
+learning_rate: 1.0e-4
+steps_per_report: 20
+steps_per_eval: 282
+save_every: 282
+max_seq_length: 512
+grad_checkpoint: true
+seed: 17
+lora_parameters:
+  rank: 8
+  dropout: 0.0
+  scale: 2.0

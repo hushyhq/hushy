@@ -1,0 +1,11 @@
+# ADAPTER SPIKE (docs/product/FINETUNE.md §3.32): a tools-only LoRA on the PLAIN Qwen3.5-2B base
+# (no cleanup fine-tune, no cleanup replay) — the adapter a two-adapter or task-arithmetic runtime
+# would ship. Data: tools data v2's tool rows only (mlx-tools/, 5,529 / 481).
+# 1.5 epochs, batch 1 x accum 16 ≈ 520 steps, ~50 min on the 4070.
+base_model: Qwen/Qwen3.5-2B
+data_dir: ../data-tools-plain
+output_dir: runs/spike-qwen3.5-2b-tools-plain
+quantization: none
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 1.5, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1792,
+        answer_only_logits: true, max_valid_rows: 320, eval_steps: 100, patience: 3, seed: 7}

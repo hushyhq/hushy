@@ -1,0 +1,9 @@
+# Round 3 repeated with another seed (2026-10-12): everything as r3-qwen3.5-4b-qlora, seed 11 instead of 7.
+# It measures how much two trainings on the same rows differ, so a difference between rounds can be told
+# from chance. It is also the first full run after the training PC's disk was cleared.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-p1-r3
+output_dir: runs/r3s11-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 11}

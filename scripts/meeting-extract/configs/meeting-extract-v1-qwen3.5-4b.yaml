@@ -1,0 +1,13 @@
+# 2026-11-07: Run B, the meeting-extract adapter on the full set (adds research-only and non-commercial ELITR, QMSum, MeetingBank: a measurement run, not shippable). 1 epoch, since Run A converged at epoch 1. A LoRA on the merged r10d 4B, kept as an adapter (merge: false), scope `meeting-extract`.
+# Recipe copied from next-message-v1 (the next-message training config): rank 32 / alpha 64, lr 1e-4, packs of 10,240 tokens, 2 per step,
+# answer-only loss. Differences: 2 epochs (the train file is 1,124 long rows, 3.97M tokens, about the same tokens as next-message's one
+# epoch but 7x fewer examples), keep_epoch_adapters so epoch 1 can be compared with epoch 2, data_dir is the sft folder staged on the
+# Modal volume as data/data-meeting-extract-v1 (train.jsonl, valid.jsonl, manifest.json from build_sft.py).
+base_model: /vol/runs/r10d-qwen3.5-4b/merged
+data_dir: ../data-meeting-extract-v1
+output_dir: runs/meeting-extract-v1-qwen3.5-4b
+merge: false
+quantization: none
+attn_implementation: kernels-community/flash-attn3@7cb368cf8278b583132eb72cbf312d54586df2e2
+lora: {rank: 32, alpha: 64, dropout: 0.0}
+train: {epochs: 1, keep_epoch_adapters: True, learning_rate: 1.0e-4, batch_size: 1, packing: True, pack_tokens: 10240, grad_accumulation_steps: 2, max_seq_length: 6144, gradient_checkpointing: False, liger: True, lora_lean: True, answer_only_logits: True, patience: 3, seed: 7, dataloader_workers: 4, max_valid_rows: 400, eval_steps: 20, log_throughput: True}

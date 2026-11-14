@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Hushy</string>
+	<key>CFBundleExecutable</key>
+	<string>Hushy</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.hushy.Hushy</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Hushy</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__BUILD__</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hushy listens only while you hold the dictation key or record a note. Audio is processed on this Mac and never uploaded.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Hushy uses this to paste your dictated text into the app you are using, and to save to or search Apple Notes if you turn that on.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Hushy adds calendar events only when you hold the Action key and confirm the event in the pill.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Hushy adds reminders only when you hold the Action key and confirm the reminder in the pill.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Hushy can record the other side of your calls alongside your mic, so meeting notes capture everyone. Audio is processed on this Mac and never uploaded.</string>
+	<!-- Sparkle 2 auto-updates (gate 13). The two placeholders are substituted by
+	     scripts/build-app.sh from HUSHY_APPCAST_URL and HUSHY_SPARKLE_PUBLIC_KEY; a build that
+	     still carries them (or empty strings) never starts the updater and says
+	     "Updates aren't configured in this build". See docs/guide/RELEASE.md. -->
+	<key>SUFeedURL</key>
+	<string>__APPCAST_URL__</string>
+	<key>SUPublicEDKey</key>
+	<string>__SPARKLE_ED_PUBLIC_KEY__</string>
+	<!-- Invite-code public key (Ed25519, base64 of the raw 32 bytes): substituted by
+	     scripts/build-app.sh from HUSHY_INVITE_PUBLIC_KEY. Left unsubstituted, the app falls
+	     back to InviteCode.productionPublicKeyBase64 (a placeholder → "not enabled in this
+	     build"). See docs/guide/INVITES.md. -->
+	<key>HushyInvitePublicKey</key>
+	<string>__INVITE_PUBLIC_KEY__</string>
+	<!-- Direct calendar connectors (docs/product/CONNECTORS.md §6.7-6.8): substituted by
+	     scripts/build-app.sh from HUSHY_GOOGLE_OAUTH_CLIENT_ID, HUSHY_GOOGLE_OAUTH_CLIENT_SECRET
+	     and HUSHY_MICROSOFT_OAUTH_CLIENT_ID. Empty or unsubstituted → that provider is not
+	     configured and its Connectors row is hidden. Never commit real values. -->
+	<key>HushyGoogleOAuthClientID</key>
+	<string>__GOOGLE_OAUTH_CLIENT_ID__</string>
+	<key>HushyGoogleOAuthClientSecret</key>
+	<string>__GOOGLE_OAUTH_CLIENT_SECRET__</string>
+	<key>HushyMicrosoftOAuthClientID</key>
+	<string>__MICROSOFT_OAUTH_CLIENT_ID__</string>
+	<!-- Which hosted Hushy services this build uses (HushyServices.swift): "official" for the
+	     maintainers' signed build, "none" for everything else. Substituted by scripts/build-app.sh
+	     from HUSHY_SERVICES; anything else, or the unsubstituted placeholder, reads as none. -->
+	<key>HushyServices</key>
+	<string>__HUSHY_SERVICES__</string>
+	<key>HushySupabaseURL</key>
+	<string>__SUPABASE_URL__</string>
+	<key>HushySupabaseAnonKey</key>
+	<string>__SUPABASE_ANON_KEY__</string>
+	<key>HushyPaddlePortalURL</key>
+	<string>__PADDLE_PORTAL_URL__</string>
+	<key>HushyPaddleMonthlyPriceID</key>
+	<string>__PADDLE_MONTHLY_PRICE_ID__</string>
+	<key>HushyPaddleYearlyPriceID</key>
+	<string>__PADDLE_YEARLY_PRICE_ID__</string>
+	<!-- Where the daily usage numbers (counts and timings, never words) would be sent. Substituted by
+	     scripts/build-app.sh from HUSHY_USAGE_METRICS_ENDPOINT, which is unset by default: empty or
+	     unsubstituted means the app makes no network call for usage numbers at all, and the
+	     batches wait in a small local queue. See handbook security/telemetry-stance. -->
+	<key>HushyUsageMetricsEndpoint</key>
+	<string>__USAGE_METRICS_ENDPOINT__</string>
+	<!-- Features switched on for a test build only (comma list, e.g. "voice-edit"; FeatureFlags). Empty in releases. -->
+	<key>HushyTestFeatures</key>
+	<string>__TEST_FEATURES__</string>
+	<!-- Right-click Services (Restyle selection). Three items rewrite the selection in place and return the text; two only
+	     copy, so they take no return type and also appear for text that cannot be replaced (a web page, a PDF). Nothing runs
+	     until the person picks one. The titles are placeholder copy; Tests/MurmurCoreTests/SelectionRestyleTests.swift keeps
+	     this list the same as RestyleService. -->
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>Hushy/[Make professional]</string></dict>
+			<key>NSMessage</key>
+			<string>makeProfessional</string>
+			<key>NSPortName</key>
+			<string>Hushy</string>
+			<key>NSSendTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+			<key>NSReturnTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>Hushy/[Make casual]</string></dict>
+			<key>NSMessage</key>
+			<string>makeCasual</string>
+			<key>NSPortName</key>
+			<string>Hushy</string>
+			<key>NSSendTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+			<key>NSReturnTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>Hushy/[Clean up]</string></dict>
+			<key>NSMessage</key>
+			<string>cleanUp</string>
+			<key>NSPortName</key>
+			<string>Hushy</string>
+			<key>NSSendTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+			<key>NSReturnTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>Hushy/[Copy as professional]</string></dict>
+			<key>NSMessage</key>
+			<string>copyAsProfessional</string>
+			<key>NSPortName</key>
+			<string>Hushy</string>
+			<key>NSSendTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>Hushy/[Copy as prompt]</string></dict>
+			<key>NSMessage</key>
+			<string>copyAsPrompt</string>
+			<key>NSPortName</key>
+			<string>Hushy</string>
+			<key>NSSendTypes</key>
+			<array><string>NSStringPboardType</string><string>public.utf8-plain-text</string></array>
+		</dict>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array><dict><key>CFBundleURLSchemes</key><array><string>hushy</string></array></dict></array>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<!-- On by default: updates download and stage in the background, then Hushy asks once to
+	     relaunch (UpdateReadyPrompt). Settings → About → "Install updates automatically" is the
+	     one switch; Sparkle keeps the person's choice in user defaults over this default. -->
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>14400</integer>
+	<key>NSHumanReadableCopyright</key>
+	<string>Private by design. Everything stays on your Mac.</string>
+</dict>
+</plist>

@@ -1,0 +1,18 @@
+DRAFT FOR RETRAIN, NOT SHIPPED. Version label: paragraph-call-v1-draft. For the insert-only paragraph step over a cleaned long dictation.
+
+--- system turn ---
+Mark where new paragraphs begin in a cleaned dictation. The sentences are numbered.
+- A new paragraph begins where a person typing would start one: a new topic, a new ask, a turn from context to request, or a sign-off. A short message, or one that stays on one thought, is a single paragraph.
+- Never change, move or repeat a word. Sentence 1 never begins a new paragraph.
+Reply with JSON {"paragraphs": [<the numbers of the sentences that begin a new paragraph>]}; an empty list when the text is one paragraph.
+
+--- user turn ---
+Text: [1] <first sentence> [2] <second sentence> ...
+Output:
+
+--- assistant turn (target) ---
+{"paragraphs":[4,7]}
+
+--- notes ---
+- The app numbers the sentences of the stitched text, asks once, and inserts a blank line before each listed sentence. Nothing else in the text can change.
+- This wording is a draft for retraining and has not been tested against a model.

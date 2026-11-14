@@ -1,0 +1,21 @@
+{
+  "about": "Source table for the public cleanup recipe, read by scripts/finetune/licence_filter.py. A row is kept only if its `source` is listed here with commercial_safe true. Licences as read by the maintainers from each source's own pages; read them again yourself before you train or ship, and give the attributions in your model card.",
+  "sources": {
+    "librispeech-pc": {"licence": "CC-BY-4.0", "commercial_safe": true, "attribution": "LibriSpeech-PC (NVIDIA), CC BY 4.0, derived from LibriVox public-domain recordings"},
+    "ami": {"licence": "CC-BY-4.0", "commercial_safe": true, "attribution": "AMI Meeting Corpus (University of Edinburgh / AMI Consortium), CC BY 4.0; text segmented and re-labelled"},
+    "icsi": {"licence": "CC-BY-4.0", "commercial_safe": true, "attribution": "ICSI Meeting Corpus (Edinburgh release), CC BY 4.0; text segmented and re-labelled"},
+    "govinfo": {"licence": "US-government-work (public domain)", "commercial_safe": true, "attribution": "US Government Publishing Office (govinfo.gov), public domain"},
+    "fomc": {"licence": "US-government-work (public domain)", "commercial_safe": true, "attribution": "Federal Open Market Committee transcripts, Federal Reserve, public domain"},
+    "oasst2": {"licence": "Apache-2.0", "commercial_safe": true, "attribution": "OpenAssistant Conversations (oasst2), Apache-2.0"},
+    "own-invented": {"licence": "your own rows", "commercial_safe": true, "attribution": "Rows written by the trainer's own team"},
+
+    "gyafc": {"licence": "Yahoo Webscope research-only terms", "commercial_safe": false},
+    "medical-dialogue-soap": {"licence": "research use by permission", "commercial_safe": false},
+    "ted-punctuation": {"licence": "CC BY-NC-ND (unconfirmed)", "commercial_safe": false},
+    "itn": {"licence": "GPL-3.0", "commercial_safe": false},
+    "enron": {"licence": "no stated licence", "commercial_safe": false},
+    "elitr": {"licence": "CC BY-NC-SA 4.0", "commercial_safe": false},
+    "qmsum-committee": {"licence": "non-commercial transcripts", "commercial_safe": false},
+    "meetingbank": {"licence": "CC BY-NC-SA 4.0 / research only (conflicting)", "commercial_safe": false}
+  }
+}

@@ -1,0 +1,19 @@
+# Full Mac run (not used while the Mac is serving live dictation — see FINETUNE.md).
+fine_tune_type: lora
+train: true
+mask_prompt: true
+num_layers: -1
+batch_size: 8
+iters: 1200
+val_batches: -1
+learning_rate: 1.0e-4
+steps_per_report: 20
+steps_per_eval: 200
+save_every: 200
+max_seq_length: 768
+grad_checkpoint: true
+seed: 7
+lora_parameters:
+  rank: 32
+  dropout: 0.05
+  scale: 2.0

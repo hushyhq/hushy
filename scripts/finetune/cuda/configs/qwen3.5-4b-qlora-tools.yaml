@@ -1,0 +1,12 @@
+# Voice actions on Qwen3.5-4B, QLoRA (NF4 base, bf16 adapters) — the ceiling check: does a 2x
+# bigger model buy tool accuracy the 2B can't reach? There is no 4B cleanup fine-tune, so this
+# starts from the Hugging Face base and its cleanup skill comes only from the ~25% replay slice:
+# compare it on the tools dev set, not on cleanup. bf16 LoRA of the 4B does not fit 12 GB.
+# batch 1 x accum 16, answer-only logits. Est. peak ~8.5 GB; est. 2.5-3.5 h for 2 epochs.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-tools
+output_dir: runs/qwen3.5-4b-qlora-tools
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1792,
+        answer_only_logits: true, max_valid_rows: 320, patience: 3, seed: 7}

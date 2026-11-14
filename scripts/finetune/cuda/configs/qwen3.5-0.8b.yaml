@@ -1,0 +1,7 @@
+# RTX 4070 Super 12 GB: bf16 LoRA, batch 4 x accum 4 (effective 16). Est. peak ~6.5 GB.
+base_model: Qwen/Qwen3.5-0.8B
+data_dir: ../data
+output_dir: runs/qwen3.5-0.8b
+quantization: none
+lora: {rank: 16, alpha: 32, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.5e-4, batch_size: 4, grad_accumulation_steps: 4, max_seq_length: 512, patience: 3, seed: 7}

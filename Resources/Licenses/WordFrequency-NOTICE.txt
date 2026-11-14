@@ -1,0 +1,13 @@
+Hushy word-frequency table (Sources/MurmurCore/Lexicon/WordFrequencyData.swift)
+
+The table holds about 87,000 lowercase English word forms and a coarse frequency grade for each. It contains no
+text from any document. The grades were computed by counting words in two shards (00000 and 00512 of 1024) of the
+English part of the C4 dataset ("Colossal Clean Crawled Corpus", Raffel et al., 2020, "Exploring the Limits of
+Transfer Learning with a Unified Text-to-Text Transformer", JMLR 21(140)), as released by the Allen Institute for AI
+at https://huggingface.co/datasets/allenai/c4.
+
+C4 is licensed under the Open Data Commons Attribution License (ODC-By) v1.0,
+https://opendatacommons.org/licenses/by/1-0/ . Its text comes from the Common Crawl web corpus
+(https://commoncrawl.org) and is subject to the Common Crawl terms of use.
+
+This product includes frequency data derived from the C4 dataset, used under ODC-By 1.0.

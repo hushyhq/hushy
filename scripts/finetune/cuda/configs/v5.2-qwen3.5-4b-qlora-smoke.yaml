@@ -1,0 +1,8 @@
+# Smoke for the 4B QLoRA path (first time on this box): 64 rows, 6 steps, then merge. Runs just
+# before the full 4B job in the same GPU-lock slot, so a broken path fails fast instead of overnight.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-v5.2
+output_dir: runs/smoke-v5.2-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 1, max_steps: 6, max_train_rows: 64, eval_steps: 6, learning_rate: 1.0e-4, batch_size: 2, grad_accumulation_steps: 2, max_seq_length: 512, seed: 7}

@@ -1,0 +1,8 @@
+# Dataset v5.2 (compact-v2), Qwen3.5-4B QLoRA (NF4 base, bf16 adapters) on the RTX 4070 SUPER 12 GB.
+# bf16 LoRA of the 4B needs ~14 GB even at batch 2 — does not fit. Est. peak ~8 GB, ~3 h for 2 epochs.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-v5.2
+output_dir: runs/v5.2-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 2, grad_accumulation_steps: 8, max_seq_length: 512, patience: 3, seed: 7}

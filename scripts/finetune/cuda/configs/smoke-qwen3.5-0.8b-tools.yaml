@@ -1,0 +1,20 @@
+# SMOKE for the voice-actions data (tools-v1 + cleanup replay): validates the long-row path
+# (1.35k-token system prompt, answer-only logits, left padding) end to end in ~5 min on the
+# RTX 4070 Super before a real run. From the Hugging Face base so it needs nothing on the box.
+base_model: Qwen/Qwen3.5-0.8B
+data_dir: ../data-tools
+output_dir: runs/smoke-qwen3.5-0.8b-tools
+quantization: none
+lora: {rank: 16, alpha: 32, dropout: 0.05}
+train:
+  epochs: 1
+  max_steps: 40
+  max_train_rows: 320
+  max_valid_rows: 32
+  learning_rate: 2.0e-4
+  batch_size: 1
+  grad_accumulation_steps: 8
+  eval_steps: 20
+  max_seq_length: 1792
+  answer_only_logits: true
+  seed: 7

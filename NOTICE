@@ -1,0 +1,86 @@
+Hushy
+Copyright (C) 2026 The Hushy Authors (see AUTHORS)
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version (LICENSE).
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+The Hushy name and logo are not covered by this licence (TRADEMARKS.md).
+
+
+Code ported from other projects
+-------------------------------
+
+Sources/MurmurCore/Cleanup/BritishAmericanSpellings.swift
+Sources/murmur-eval/WhisperEnglishNormalizer.swift
+Sources/murmur-eval/WhisperNumberNormalizer.swift
+    Generated from or ported from openai/whisper (whisper/normalizers), MIT License,
+    Copyright (c) 2022 OpenAI. https://github.com/openai/whisper
+
+Sources/murmur-eval/External/DRESScorer.swift
+    Ported from the DRES evaluation code (Teleki et al., arXiv 2509.20321), MIT License.
+    https://github.com/mariateleki/dres
+
+The MIT License for the code above:
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+    and associated documentation files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or
+    substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+    BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+    DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+Data shipped in this source
+---------------------------
+
+Sources/MurmurCore/Lexicon/WordFrequencyData.swift
+    Word-frequency grades computed from the C4 dataset (allenai/c4), Open Data Commons Attribution
+    License (ODC-By) 1.0. No text from any document. Resources/Licenses/WordFrequency-NOTICE.txt.
+
+Sources/MurmurCore/Lexicon/Packs/, Sources/MurmurCore/Lexicon/DomainPackData.swift
+    Names of NBA players and teams from Wikidata (CC0 1.0), built by scripts/lexicon/build_nba_pack.py.
+
+Resources/Licenses/Qwen3.5-LICENSE.txt
+    Apache License 2.0 text of the Qwen3.5 models, which the app can download from Hugging Face.
+
+
+Swift packages (fetched by SwiftPM at build time, not included here)
+--------------------------------------------------------------------
+
+FluidAudio, swift-transformers, swift-huggingface, swift-jinja ............. Apache-2.0
+swift-argument-parser, swift-asn1, swift-collections, swift-crypto,
+swift-numerics, swift-syntax ................................................. Apache-2.0
+GRDB.swift, mlx-swift, mlx-swift-lm, EventSource, yyjson ..................... MIT
+Sparkle ...................................................................... MIT-style, with notices in its LICENSE
+
+Each package's own licence file applies. A built copy of the app must carry their notices.
+
+
+Models the app downloads (not included here)
+--------------------------------------------
+
+The speech model (NVIDIA Parakeet, through FluidAudio) and the public Qwen3.5 conversions
+(mlx-community, Apache-2.0) are downloaded from Hugging Face under their own licences.
+
+
+Corpora the recipe downloads (not included here)
+-------------------------------------------------
+
+The training and evaluation scripts download public corpora from their own hosts. Each keeps its own
+licence; scripts record a licence tag on every row they build (Evals/meeting-extract/LICENSES.md,
+training/README.md). For example, the AMI Meeting Corpus and the ICSI Meeting Corpus are licensed
+under CC BY 4.0, which requires attribution in any model trained on them.

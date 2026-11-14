@@ -1,0 +1,11 @@
+# p1 on the 4B (size arm): the p1 training set unchanged (../data-p1), only the base model differs.
+# QLoRA (NF4 base, bf16 adapters) because a bf16 LoRA of the 4B does not fit in 12 GB; that is the one
+# difference from p1 besides size. Batch 1 x accum 16 keeps the effective batch of 16 and the same 542
+# optimiser steps as p1: rows here run to about 718 tokens, and batch 2 at that length would pass 12 GB
+# (the v5.2 4B run peaked at 9.49 GB with rows capped at 512).
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-p1
+output_dir: runs/p1-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 7}

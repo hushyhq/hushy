@@ -1,0 +1,8 @@
+# Round 4, arm B (2026-10-12), meaning preservation only: arm A plus 337 invented long dictations built around what round 3 got wrong (unusual terms, run-on read-outs, sound-alikes, self-corrections), each fact-checked.
+# Settings and seed as r3-qwen3.5-4b-qlora, so the data is the only change. Control: r3 and its seed-11 repeat.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-p1-r4b
+output_dir: runs/r4b-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 7}

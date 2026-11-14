@@ -1,0 +1,9 @@
+# Group contract g1, based on the newest 2B cleanup preset (v5.5).
+# 1024 is provisional until the batch is built; check manifest rough_max_tokens plus template margin.
+# RTX 4070 Super 12 GB: bf16 LoRA, batch 2 x accum 8 (effective 16).
+base_model: Qwen/Qwen3.5-2B
+data_dir: ../data-g1
+output_dir: runs/g1-qwen3.5-2b
+quantization: none
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 2, grad_accumulation_steps: 8, max_seq_length: 1024, patience: 3, seed: 7}

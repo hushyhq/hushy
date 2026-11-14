@@ -1,0 +1,8 @@
+# Round 4, arm A (2026-10-12), meaning preservation only: round 3's rows with the 104 training answers a fact check found faulty removed (950 answers were checked, 870 of about 1,480 long ones); nothing added.
+# Settings and seed as r3-qwen3.5-4b-qlora, so the data is the only change. Control: r3 and its seed-11 repeat.
+base_model: Qwen/Qwen3.5-4B
+data_dir: ../data-p1-r4a
+output_dir: runs/r4a-qwen3.5-4b-qlora
+quantization: 4bit
+lora: {rank: 32, alpha: 64, dropout: 0.05}
+train: {epochs: 2, learning_rate: 1.0e-4, batch_size: 1, grad_accumulation_steps: 16, max_seq_length: 1024, patience: 3, seed: 7}
