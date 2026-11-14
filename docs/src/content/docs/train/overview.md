@@ -11,7 +11,7 @@ measure them. This section walks through the recipe with public data only.
 The weights of the models Hushy ships are not open yet, and the dataset those models were trained
 on is not published. Some of that data came from sources we cannot redistribute in a model, and
 the training labels were written by large language models whose terms we have not finished
-reviewing. The top-level README explains the reasons.
+reviewing. [training/README.md](https://github.com/hushyhq/hushy/blob/main/training/README.md) has the details.
 
 What you can do is train equivalent models yourself. The two public recipes below use only sources
 whose licences allow commercial training. A model you train this way is not one of the models we
