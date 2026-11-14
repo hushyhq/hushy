@@ -1,7 +1,7 @@
 # Word-frequency table (graded lexicon)
 
-2026-10-28. Algorithms audit item 5 / 1b (`docs/research/algorithms-audit-2026-10-26.md`); founder approved shipping a 1 to 2 MB
-frequency table with an attribution line on 28 Oct. Design record: `.claude/DECISIONS.md`, 2026-10-28.
+2026-10-28. Algorithms audit item 5 / 1b (`docs/research/algorithms-audit-2026-10-26.md`); the maintainers approved shipping a 1 to 2 MB
+frequency table with an attribution line on 28 Oct.
 
 ## What it is
 

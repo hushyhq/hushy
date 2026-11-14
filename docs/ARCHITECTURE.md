@@ -1,10 +1,9 @@
 # Hushy architecture
 
-This document explains how Hushy (codename Murmur — see [.claude/DECISIONS.md](../.claude/DECISIONS.md)
-for why the Swift module/target names below stay `Murmur`/`MurmurCore`) is put together and why.
-It is written so a new engineer or agent can change the code confidently. For status and next
-steps see [.claude/HANDOVER.md](../.claude/HANDOVER.md); for the reasoning behind choices see
-[.claude/DECISIONS.md](../.claude/DECISIONS.md).
+This document explains how Hushy is put together and why. Murmur was the project's codename, and
+the Swift module and target names below keep it (`Murmur`, `MurmurCore`) so a rename doesn't break
+history. It is written so a new contributor can change the code confidently. The user-facing
+explanation is at [docs.tryhushy.com](https://docs.tryhushy.com).
 
 ## 1. Principles
 

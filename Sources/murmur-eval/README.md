@@ -6,7 +6,7 @@ current results.
 | File | Contents |
 |---|---|
 | `Eval.swift` | Entry point, argument parsing, paths |
-| (target `HushyModelsRemote`) | `--backend remote`: eval-only `RemoteLanguageModel` over vLLM on the CUDA box (Tailscale); same prompts/grammar as MLX; never linked by the app (`.claude/GPU-TRAINING.md` §8) |
+| (target `HushyModelsRemote`) | `--backend remote`: eval-only `RemoteLanguageModel` over vLLM on a CUDA machine you run; same prompts/grammar as MLX; never linked by the app |
 | `Datasets.swift` | Dataset catalogue and downloader (Hugging Face datasets-server), with checkpoint/resume and backoff |
 | `CommonVoiceImport.swift` | `import-commonvoice`: local import of manually-downloaded Common Voice releases (TSV/CSV parsing, MP3→16kHz WAV, balanced sampling) |
 | `Recognizers.swift` | Pluggable engines: Parakeet (FluidAudio) and Apple Dictation / SpeechTranscriber |

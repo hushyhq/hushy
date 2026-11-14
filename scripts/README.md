@@ -15,7 +15,6 @@
 | `run-evals.sh [--quick]` | Runs the evaluation suite; results appended to `Evals/results.md` |
 | `finetune/finetune.sh data / smoke / convert / eval` | Cleanup-model fine-tune (M7): synthetic data + manifest, Mac smoke LoRA, CUDA training (`finetune/cuda/`), 4-bit MLX conversion, dev evals. See `finetune/README.md` and `docs/product/FINETUNE.md` |
 | `mock-mic.sh [--report <dir>] [--clips <dir>] [--keep]` | Headless mock-microphone test (debug build only): plays synthetic `say` clips (or your own `clips.json` folder) into BlackHole 2ch and drives Hushy's own `AudioCapture`, dictation path, `NoteRecorder` and remembered-voice code; prints pass/fail/skipped per scenario, writes `mock-mic.json`, exits non-zero on failure (77 = skipped, 4 = mic permission block). Real time, about 5-6 minutes; standalone, not in `run-evals.sh`. See `docs/guide/MOCK-MIC.md` |
-| `release.sh [--dry-run] [--dmg] [--skip-notarize]` | Release pipeline: release build → Developer ID signing → notarization (`notarytool`, keychain profile) → staple → zip/dmg → Sparkle appcast entry. Stops early without credentials; `--dry-run` prints every step. See `docs/guide/RELEASE.md` |
 
 Signing: `build-app.sh` uses `MURMUR_SIGN_IDENTITY` if set; otherwise the "Developer ID Application"
 identity of team `RY2CM3XV32` from the login keychain (hardened runtime, release entitlements, not
@@ -24,5 +23,5 @@ otherwise a local dev certificate, and it prints that permissions will not carry
 `scripts/test-developer-id.sh` checks the identity choice against invented `security` output.
 Release signing: set `MURMUR_SIGN_IDENTITY="Developer ID Application: …"` before `build-app.sh`
 to sign with hardened runtime; `HUSHY_APPCAST_URL` / `HUSHY_SPARKLE_PUBLIC_KEY` fill the Sparkle
-placeholders in `Info.plist` (empty = updates not configured). `release.sh` drives the whole
-pipeline including notarization — see `docs/guide/RELEASE.md`.
+placeholders in `Info.plist` (empty = updates not configured). The maintainers' signed release and notarization tooling is
+not part of this repository.

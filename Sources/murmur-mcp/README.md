@@ -1,7 +1,7 @@
 # murmur-mcp
 
 Read-only [Model Context Protocol](https://modelcontextprotocol.io) server over stdio. The Swift
-target is still named `murmur-mcp` (see `.claude/DECISIONS.md`), but `scripts/build-app.sh` ships
+target keeps the codename `murmur-mcp`, but `scripts/build-app.sh` ships
 the built binary as `Hushy.app/Contents/MacOS/hushy-mcp` — that on-disk filename is what AI
 clients launch as a subprocess and what macOS attributes TCC/permission prompts to, so it was
 renamed even though the Swift target name was not. It opens the Hushy database read-only and
