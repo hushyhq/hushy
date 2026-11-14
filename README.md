@@ -1,91 +1,61 @@
 # Hushy
 
-Hushy is a dictation and meeting-notes app for the Mac. Hold a key, speak, let go, and clean text
-appears where your cursor is. Speech recognition and cleanup run on the Mac.
+Hushy is a voice layer for the Mac. You talk and clean text appears where your cursor is. It also
+takes notes and meeting notes. Speech recognition and text cleanup run on your Mac.
 
-This repository holds the source of the app, the training recipe and pipeline for its models, and
-the tools we use to evaluate them. It is a snapshot of the maintainers' working repository, made
-from an allowlist; history before the snapshot is not included.
+Documentation is at [docs.tryhushy.com](https://docs.tryhushy.com). It covers using the app, how
+it works, how to train your own models, and how to measure accuracy.
 
-## What is here
+## What it does
 
-| Part | Where | What it is |
-|---|---|---|
-| The app | `Sources/Murmur`, `Sources/MurmurCore`, `Sources/HushyModels*`, `Sources/HushyObjC` | Every Swift target the app is built from |
-| Command-line tools | `Sources/murmur-mcp`, `Sources/murmur-eval`, `Sources/murmur-bench`, `Sources/hushy-*` | The MCP helper, the evaluation harness, benchmarks, and maintainer tools |
-| Tests | `Tests/` | `swift test` runs them with no network and no account |
-| Training recipe | `training/`, `scripts/finetune/`, `scripts/meeting-extract/`, `scripts/retrain_*.py` | Data builders with per-row licence tags, the commercial-only filter, trainer configs |
-| Evaluation | `Sources/murmur-eval`, `scripts/*_score.py`, `scripts/api_judge*.py`, `Evals/` | Runners, scorers, judge rubrics, small invented demo sets, public-benchmark downloaders |
+- **Dictation.** Double-tap fn, talk, press Return. Hushy pastes the text you meant, with fillers,
+  restarts and corrections resolved.
+- **Tones.** Refined (the default), Professional, Casual, or As spoken to keep every word.
+- **Notes and meetings.** Record a note or a call and get a summary with action items. In a build
+  from source they are on in debug builds and in `scripts/build-app.sh --meetings-preview` builds.
 
-## What is not here
+## Install
 
-- **Datasets.** No training data, no labels, no development, held-out or sealed evaluation sets.
-  The recipe downloads public corpora from their own hosts and never mirrors them.
-- **Model weights.** See below.
-- **The hosted services.** The account service, the model host, the update feed, the website and
-  their keys are run by the maintainers and are not part of this source.
+Download the signed app from [tryhushy.com](https://tryhushy.com). Hushy is free.
 
-## Model weights
+## Build from source
 
-The weights of Hushy's own cleanup models are not released yet. For now, the app the maintainers
-sign and ship downloads those models after the person signs in.
-
-We are not releasing the current weights, for these reasons:
-
-- **Training-data licences.** Some training rows come from sets we may not redistribute in a
-  model: research-only sets, GPL-licensed rows, and rows with no stated licence.
-- **Model-written labels.** The training targets were written by large language models from
-  several providers. We have not finished reviewing those providers' terms for releasing models
-  trained on such labels.
-
-The path to open weights:
-
-1. Retrain on commercial-safe sources only. `scripts/finetune/licence_filter.py` drops every row
-   whose source is not on the commercial-safe list, and every row without a source.
-2. Publish each weight with a licence manifest that shows zero non-commercial rows.
-3. Publish those weights openly, each under its own licence.
-
-`training/configs/` holds the public configs for that retrain.
-
-You do not need the weights to use a copy you build yourself. With `HushyServices = none`,
-dictation works with no account: speech recognition runs on the Mac, and cleanup uses Apple's
-on-device model where your Mac has it, or the rule-based cleaner.
-
-## Build it
-
-You need an Apple Silicon Mac with macOS 15 or later (macOS 26 or later for Apple's on-device
-model) and Xcode 26. [BUILDING.md](BUILDING.md) has the details.
+You need an Apple Silicon Mac with macOS 15 or later, and Xcode 26.
 
 ```bash
+git clone https://github.com/hushyhq/hushy.git
+cd hushy
 swift build
 swift test
-scripts/build-app.sh --open
+HUSHY_SERVICES=none scripts/build-app.sh --open
 ```
 
-## A copy you build yourself
+The first launch asks for Microphone and Accessibility access and downloads the speech model
+(about 610 MB, once). A build from source has no account and sends nothing to the maintainers.
+[BUILDING.md](BUILDING.md) has the details, including what each build setting does.
 
-A build from this source uses no Hushy service (`HushyServices = none`):
+## Train your own models
 
-- There is no account and no sign-in screen. Dictation works without an account.
-- Nothing is sent to the Hushy website: no daily count, no crash reports, no feedback.
-- It is not offered the maintainers' updates.
-- The calendar connectors stay hidden until you add your own OAuth client IDs.
-- The Hushy-hosted cleanup models cannot be downloaded. The speech model downloads from Hugging
-  Face as usual. Cleanup uses Apple's on-device model where your Mac has it, or the rule-based
-  cleaner.
+This repository holds the recipe for the on-device cleanup model and the meeting-extract model, and
+the tools that measure them. The recipe uses public data only. Step-by-step instructions are at
+[docs.tryhushy.com/train/overview](https://docs.tryhushy.com/train/overview/).
 
-Details: [BUILDING.md](BUILDING.md#services).
+Two things are not here. The weights of the models we ship are not released yet, and the dataset
+we trained them on is not published. Both are explained in the docs and in
+[training/README.md](training/README.md).
+
+## Contribute
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md). In short, open an issue for anything large, keep a pull
+request to one change, and say what you ran. Your first pull request asks you to sign the
+contributor licence agreement ([CLA.md](CLA.md)) through CLA Assistant. Everyone is expected to
+follow the [code of conduct](CODE_OF_CONDUCT.md). Report security problems privately, as
+[SECURITY.md](SECURITY.md) describes.
 
 ## Licence
 
-`SPDX-License-Identifier: GPL-3.0-or-later`
+Hushy is free software under the GNU General Public License, version 3 or any later version
+([LICENSE](LICENSE)). Third-party notices are in [NOTICE](NOTICE).
 
-Copyright (C) 2026 The Hushy Authors ([AUTHORS](AUTHORS)). Hushy is free software under the GNU
-General Public License, version 3 or (at your option) any later version ([LICENSE](LICENSE)).
-Third-party code and data notices are in [NOTICE](NOTICE). The Hushy name and logo are not licensed:
-[TRADEMARKS.md](TRADEMARKS.md).
-
-## Contributing
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md). Contributions need a signed contributor licence agreement
-([CLA.md](CLA.md)); CLA Assistant asks you to sign it on your first pull request. Report security problems privately: [SECURITY.md](SECURITY.md).
+The Hushy name and logo are not covered by that licence. If you distribute a build, give it another
+name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the rules.
