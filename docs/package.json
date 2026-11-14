@@ -1,0 +1,19 @@
+{
+  "name": "hushy-docs",
+  "private": true,
+  "type": "module",
+  "description": "The Hushy documentation site (docs.tryhushy.com), built with Astro Starlight.",
+  "scripts": {
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.7",
+    "astro": "7.4.4"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.0"
+  }
+}
