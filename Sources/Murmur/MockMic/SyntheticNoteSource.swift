@@ -20,6 +20,9 @@ final class SyntheticNoteSource: NoteAudioSource {
     }
 
     private let samples: [Float]
+    /// Blocks per 20 ms tick: 1 is real time; more plays the call faster than real time (the memory trial's
+    /// `--speed`, which fills an hour's journal in minutes to find where finalize memory goes).
+    private let speed: Int
     private let state = OSAllocatedUnfairLock(initialState: State())
     private var timer: DispatchSourceTimer?
     /// A rebuild clears the fault (a device that comes back) or leaves it (a dead one).
@@ -27,8 +30,9 @@ final class SyntheticNoteSource: NoteAudioSource {
     private(set) var rebuildCount = 0
     nonisolated static let block = 320   // 20 ms at 16 kHz
 
-    init(samples: [Float]) {
+    init(samples: [Float], speed: Int = 1) {
         self.samples = samples.isEmpty ? [Float](repeating: 0, count: 16_000) : samples
+        self.speed = max(1, speed)
     }
 
     func setFault(_ fault: Fault) { state.withLock { $0.fault = fault } }
@@ -42,21 +46,24 @@ final class SyntheticNoteSource: NoteAudioSource {
         let source = samples
         let state = self.state
         timer.schedule(deadline: .now(), repeating: .milliseconds(20), leeway: .milliseconds(2))
-        timer.setEventHandler(handler: Self.deliver(from: source, into: state))
+        timer.setEventHandler(handler: Self.deliver(from: source, into: state, blocks: speed))
         timer.resume()
         self.timer = timer
     }
 
     /// The timer's work, made outside the main actor: it runs on the source's own queue every 20 ms.
-    nonisolated private static func deliver(from source: [Float], into state: OSAllocatedUnfairLock<State>) -> @Sendable () -> Void {
+    nonisolated private static func deliver(
+        from source: [Float], into state: OSAllocatedUnfairLock<State>, blocks: Int
+    ) -> @Sendable () -> Void {
         {
             let level = state.withLock { current -> (@Sendable (Float) -> Void, Float)? in
                 guard current.running, current.fault != .stall else { return nil }
-                var block = [Float](repeating: 0, count: Self.block)
+                let count = Self.block * blocks
+                var block = [Float](repeating: 0, count: count)
                 if current.fault != .zeros {
-                    for index in 0..<Self.block { block[index] = source[(current.position + index) % source.count] }
+                    for index in 0..<count { block[index] = source[(current.position + index) % source.count] }
                 }
-                current.position = (current.position + Self.block) % source.count
+                current.position = (current.position + count) % source.count
                 current.buffer += block
                 current.sinceLevel += 1
                 guard current.sinceLevel >= 5, let level = current.level else { return nil }

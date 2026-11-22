@@ -25,6 +25,14 @@ public enum LocalCleanupBackend {
         configuration.speculation = (speculation ?? entry.speculation) ? (tuning ?? SpeculationSettings()) : nil
         configuration.promptProfile = MLXLanguageModel.PromptProfile(rawValue: entry.promptProfile.rawValue) ?? .production
         configuration.toolGrammar = "strict"
+        // The meeting-extract adapter (Run A) rides on the 4B it was trained on, unfused and on only for meeting-facts
+        // calls (`MLXEngine.applyAdapterScope`). Present only when installed next to the model or named for an eval.
+        let modelsRoot = directory.deletingLastPathComponent().deletingLastPathComponent()
+        if MeetingExtractAdapter.fits(entryID: entry.id), configuration.adapterDirectory == nil,
+           let adapter = MeetingExtractAdapter.installedDirectory(modelsRoot: modelsRoot) {
+            configuration.adapterDirectory = adapter
+            configuration.adapterScope = MLXEngine.meetingRecordsScope
+        }
         return configuration
     }
 

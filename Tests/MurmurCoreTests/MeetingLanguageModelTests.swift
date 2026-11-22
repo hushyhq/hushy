@@ -255,7 +255,7 @@ struct MeetingLanguageModelTests {
         let shared = LongDecodeFake()
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: DigestFake("apple", contextTokens: 4_096), activity: activity,
-                                         health: ModelHealth(), pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         health: ModelHealth(), pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(20))
         model.route(for: Self.fourB)
         let transcript = TranscriptChunkerTests.meeting(turns: 40)
@@ -280,7 +280,7 @@ struct MeetingLanguageModelTests {
         let shared = LongDecodeFake(hanging: 5, answerAfter: .milliseconds(50))
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: DigestFake("apple", contextTokens: 4_096), activity: activity,
-                                         health: ModelHealth(), pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         health: ModelHealth(), pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(5))
         model.route(for: Self.fourB)
         let transcript = TranscriptChunkerTests.meeting(turns: 40)
@@ -306,7 +306,7 @@ struct MeetingLanguageModelTests {
         let apple = DigestFake("apple", contextTokens: 4_096)
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: apple, activity: activity, health: ModelHealth(),
-                                         pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(40))
         model.route(for: Self.fourB)
         var configuration = NoteSummarizer.Configuration()
@@ -349,7 +349,7 @@ struct MeetingLanguageModelTests {
         let apple = DigestFake("apple", contextTokens: 4_096)
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: apple, activity: activity, health: ModelHealth(),
-                                         pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(5))
         model.route(for: Self.fourB)
         var configuration = NoteSummarizer.Configuration()
@@ -375,7 +375,7 @@ struct MeetingLanguageModelTests {
         let apple = DigestFake("apple", contextTokens: 4_096)
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: apple, activity: activity, health: ModelHealth(),
-                                         pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(5))
         model.route(for: Self.fourB)
         var configuration = NoteSummarizer.Configuration()
@@ -405,7 +405,7 @@ struct MeetingLanguageModelTests {
         let apple = DigestFake("apple", contextTokens: 4_096)
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: apple, activity: activity, health: ModelHealth(),
-                                         pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(5))
         model.route(for: Self.fourB)
         var configuration = NoteSummarizer.Configuration()
@@ -435,7 +435,7 @@ struct MeetingLanguageModelTests {
         let begun = Mutex(false)
         let shared = DigestFake("four-b", contextTokens: 262_144)
         let model = MeetingLanguageModel(shared: shared, apple: DigestFake("apple", contextTokens: 4_096), activity: activity,
-                                         health: ModelHealth(), pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         health: ModelHealth(), pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(5), respondBegins: {
             // The summarizer's wait found no dictation; one starts before the call does, and keeps going.
             guard !begun.withLock({ let was = $0; $0 = true; return was }) else { return }
@@ -495,7 +495,7 @@ struct MeetingLanguageModelTests {
         let shared = LongDecodeFake(hanging: 1)
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: DigestFake("apple", contextTokens: 4_096), activity: activity,
-                                         health: ModelHealth(), pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         health: ModelHealth(), pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(300))
         model.route(for: Self.fourB)
         let transcript = TranscriptChunkerTests.meeting(turns: 40)
@@ -522,7 +522,7 @@ struct MeetingLanguageModelTests {
         let shared = LongDecodeFake(hanging: 1, answerAfter: .milliseconds(10))
         let activity = ForegroundActivity()
         let model = MeetingLanguageModel(shared: shared, apple: DigestFake("apple", contextTokens: 4_096), activity: activity,
-                                         health: health, pollInterval: .milliseconds(5), preemptInterval: .milliseconds(5),
+                                         health: health, pollInterval: .milliseconds(5),
                                          quietAfterPreemption: .milliseconds(5))
         model.route(for: Self.fourB)
         let transcript = TranscriptChunkerTests.meeting(turns: 40)

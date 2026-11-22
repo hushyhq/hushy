@@ -99,9 +99,10 @@ public struct MeetingFact: Codable, Sendable, Equatable, Identifiable, Fetchable
     }
 
     /// `isVisible` as SQL.
-    public static var visible: SQL {
-        SQL(sql: "supersededBy IS NULL AND status <> 'dismissed' AND (grounding = 'verified' OR origin IN ('user','jot','legacy'))")
-    }
+    public static var visible: SQL { SQL(sql: visibleCondition) }
+
+    static let visibleCondition =
+        "supersededBy IS NULL AND status <> 'dismissed' AND (grounding = 'verified' OR origin IN ('user','jot','legacy'))"
 }
 
 extension Store {

@@ -5,13 +5,49 @@ import os
 /// Whether a dictation is in progress (recording or being cleaned). Background model work asks it before each
 /// call and waits while it is busy, so one local model can serve both without a summary delaying a dictation.
 public final class ForegroundActivity: Sendable {
-    private let busy = Mutex(false)
+    private struct State {
+        var busy = false
+        var waiters: [UInt64: CheckedContinuation<Void, Never>] = [:]
+        var nextWaiter: UInt64 = 0
+    }
+
+    private let state = Mutex(State())
 
     public init() {}
 
-    public var isBusy: Bool { busy.withLock { $0 } }
+    public var isBusy: Bool { state.withLock { $0.busy } }
 
-    public func set(busy value: Bool) { busy.withLock { $0 = value } }
+    public func set(busy value: Bool) {
+        let woken = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.busy = value
+            guard value else { return [] }
+            defer { state.waiters.removeAll() }
+            return Array(state.waiters.values)
+        }
+        for waiter in woken { waiter.resume() }
+    }
+
+    /// Returns the moment a dictation starts (at once when one is in progress), or when the task is cancelled. No
+    /// polling: `set(busy: true)` wakes every waiter, so background work stops within the time it takes to notice
+    /// cancellation, not a poll interval later.
+    public func untilBusy() async {
+        let id = state.withLock { state -> UInt64 in
+            state.nextWaiter += 1
+            return state.nextWaiter
+        }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let now = state.withLock { state -> Bool in
+                    if state.busy || Task.isCancelled { return true }
+                    state.waiters[id] = continuation
+                    return false
+                }
+                if now { continuation.resume() }
+            }
+        } onCancel: {
+            state.withLock { $0.waiters.removeValue(forKey: id) }?.resume()
+        }
+    }
 
     /// Returns once no dictation is in progress, or when the task is cancelled.
     public func waitUntilIdle(pollInterval: Duration = .milliseconds(250)) async {
@@ -48,8 +84,8 @@ public struct ForegroundPreempted: Error, Sendable {}
 ///   does not fit Apple FM's window, so a per-call fallback alone cannot save it).
 /// - **Dictation first, always.** `yieldToForeground` holds each summary call back while a dictation is in progress,
 ///   and a call already running on the shared model is cancelled the moment a dictation starts (the MLX decoder checks
-///   for cancellation between tokens and prefill chunks), then asked again once the dictation is over. A dictation waits
-///   for the decoder to reach its next check, never for a call to finish. Calls go to `shared` marked
+///   for cancellation between tokens and between prompt chunks of at most 128 tokens), then asked again once the
+///   dictation is over. A dictation waits for the decoder to reach its next check, never for a call to finish. Calls go to `shared` marked
 ///   `LanguageModelOptions.isBackground`, so a cut-short call leaves nothing of itself running (no prefix rebuilt for the
 ///   next attempt) for the dictation to wait behind. A summary never runs to the end over a
 ///   dictation: after each cut-short call it waits for a longer quiet spell first (`quietPeriod`), so dictations that
@@ -68,7 +104,6 @@ public final class MeetingLanguageModel: LanguageModel {
     private let apple: any LanguageModel
     private let activity: ForegroundActivity
     private let pollInterval: Duration
-    private let preemptInterval: Duration
     private let health: ModelHealth
     private let quietAfterPreemption: Duration
     private let respondBegins: (@Sendable () -> Void)?
@@ -83,7 +118,7 @@ public final class MeetingLanguageModel: LanguageModel {
     /// - Parameter respondBegins: tests only. Runs as a call to the shared model begins, after the summarizer's wait.
     public init(
         shared: any LanguageModel, apple: any LanguageModel, activity: ForegroundActivity, health: ModelHealth = .shared,
-        pollInterval: Duration = .milliseconds(250), preemptInterval: Duration = .milliseconds(50),
+        pollInterval: Duration = .milliseconds(250),
         quietAfterPreemption: Duration = .seconds(2), respondBegins: (@Sendable () -> Void)? = nil
     ) {
         self.shared = shared
@@ -91,7 +126,6 @@ public final class MeetingLanguageModel: LanguageModel {
         self.activity = activity
         self.health = health
         self.pollInterval = pollInterval
-        self.preemptInterval = preemptInterval
         self.quietAfterPreemption = quietAfterPreemption
         self.respondBegins = respondBegins
     }
@@ -153,14 +187,15 @@ public final class MeetingLanguageModel: LanguageModel {
         // never waits here, so no wait can pass as a call's own time: a dictation that began since is a cut-short call,
         // and the summarizer yields again.
         if activity.isBusy { throw cutShort() }
-        let model = shared, activity = activity, interval = preemptInterval
+        let model = shared, activity = activity
         var background = options
         background.isBackground = true
         let answer: String? = try await health.backgroundCall {
             try await withThrowingTaskGroup(of: String?.self) { [background] group in
                 group.addTask { try await model.respond(instructions: instructions, prompt: prompt, schema: schema, options: background) }
                 group.addTask {
-                    while !activity.isBusy { try await Task.sleep(for: interval) }
+                    // Woken by the key press itself (`ForegroundActivity.set`), not found by a poll.
+                    await activity.untilBusy()
                     return nil
                 }
                 defer { group.cancelAll() }

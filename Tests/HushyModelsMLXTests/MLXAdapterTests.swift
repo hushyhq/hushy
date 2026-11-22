@@ -5,19 +5,22 @@ import Testing
 
 @Suite("MLX adapter plumbing")
 struct MLXAdapterTests {
-    @Test("prefix LRU: hits refresh recency, inserts evict the least recently used")
+    @Test("prefix LRU: hits refresh recency, inserts evict the least recently used of the same slot")
     func lru() {
-        var store = PrefixCacheStore<Int>(capacity: 2)
-        store.insert(1, for: "a")
-        store.insert(2, for: "b")
-        #expect(store.entry(for: "a") == 1)
-        let evicted = store.insert(3, for: "c")
-        #expect(evicted == ["b"])
-        #expect(store.entry(for: "b") == nil)
-        #expect(store.keys == ["c", "a"])
-        store.insert(4, for: "a")
+        func key(_ text: String) -> PrefixKey { PrefixKey(system: text) }
+        var store = PrefixCacheStore<Int>(pinnedCapacity: 1, transientCapacity: 2)
+        store.insert(1, for: key("a"), in: .transient)
+        store.insert(2, for: key("b"), in: .transient)
+        #expect(store.entry(for: key("a"), in: .transient) == 1)
+        let evicted = store.insert(3, for: key("c"), in: .transient)
+        #expect(evicted == [key("b")])
+        #expect(store.entry(for: key("b"), in: .transient) == nil)
+        #expect(store.keys(.transient) == [key("c"), key("a")])
+        store.insert(4, for: key("a"), in: .transient)
         #expect(store.count == 2)
-        #expect(store.entry(for: "a") == 4)
+        #expect(store.entry(for: key("a"), in: .transient) == 4)
+        #expect(store.entry(for: key("a"), in: .pinned) == nil, "a slot only finds its own entries")
+        #expect(PrefixKey(system: "a", adapterOn: true) != key("a"), "a prefix prefilled with the adapter on is another entry")
         store.removeAll()
         #expect(store.count == 0)
     }

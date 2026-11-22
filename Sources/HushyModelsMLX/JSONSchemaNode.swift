@@ -15,6 +15,8 @@ indirect enum JSONSchemaNode: Equatable, Sendable {
     case boolean
     case integer
     case array(items: JSONSchemaNode, maxItems: Int)
+    /// `anyOf` of one node and `{"type": "null"}`: the node or `null` (the meeting-extract answer's owner and due).
+    case nullable(JSONSchemaNode)
 
     struct Property: Equatable, Sendable {
         let name: String
@@ -24,6 +26,9 @@ indirect enum JSONSchemaNode: Equatable, Sendable {
     /// Arrays without `maxItems` stop after this many items (a runaway-list guard, not a limit
     /// any current schema relies on: the largest asks for "0 to 3" actions).
     static let defaultMaxItems = 8
+    /// The meeting-extract answer lists every record of a ~1,800-word chunk; its schema (fixed by training) has no
+    /// `maxItems`, so it gets a looser runaway guard than the default.
+    static let meetingRecordsMaxItems = 48
     private static let maxDepth = 8
 
     static func parse(_ spec: GenerationSchemaSpec) throws -> JSONSchemaNode {
@@ -38,17 +43,20 @@ indirect enum JSONSchemaNode: Equatable, Sendable {
         }
         let definitions = (root["$defs"] as? [String: Any] ?? [:])
             .merging(root["definitions"] as? [String: Any] ?? [:]) { first, _ in first }
-        return try node(root, definitions: definitions, name: spec.name, depth: 0)
+        let maxItems = spec.name == MeetingExtractPrompt.schemaName ? meetingRecordsMaxItems : defaultMaxItems
+        return try node(root, definitions: definitions, name: spec.name, depth: 0, maxItems: maxItems)
     }
 
-    private static func node(_ raw: [String: Any], definitions: [String: Any], name: String, depth: Int) throws -> JSONSchemaNode {
+    private static func node(
+        _ raw: [String: Any], definitions: [String: Any], name: String, depth: Int, maxItems: Int
+    ) throws -> JSONSchemaNode {
         guard depth <= maxDepth else { throw LanguageModelError.unsupportedSchema("\(name): nested too deeply") }
         if let ref = raw["$ref"] as? String {
             let key = ref.split(separator: "/").last.map(String.init) ?? ref
             guard ref.hasPrefix("#/"), let target = definitions[key] as? [String: Any] else {
                 throw LanguageModelError.unsupportedSchema("\(name): unresolved $ref \(ref)")
             }
-            return try node(target, definitions: definitions, name: name, depth: depth + 1)
+            return try node(target, definitions: definitions, name: name, depth: depth + 1, maxItems: maxItems)
         }
         if let values = raw["enum"] as? [Any] {
             let strings = values.compactMap { $0 as? String }
@@ -56,6 +64,13 @@ indirect enum JSONSchemaNode: Equatable, Sendable {
                 throw LanguageModelError.unsupportedSchema("\(name): only non-empty string enums are supported")
             }
             return .enumeration(strings)
+        }
+        if let options = raw["anyOf"] as? [[String: Any]] {
+            let others = options.filter { $0["type"] as? String != "null" }
+            guard options.count == 2, others.count == 1 else {
+                throw LanguageModelError.unsupportedSchema("\(name): anyOf is supported only as one type or null")
+            }
+            return .nullable(try node(others[0], definitions: definitions, name: name, depth: depth + 1, maxItems: maxItems))
         }
         switch raw["type"] as? String {
         case "string": return .string
@@ -65,8 +80,8 @@ indirect enum JSONSchemaNode: Equatable, Sendable {
             guard let items = raw["items"] as? [String: Any] else {
                 throw LanguageModelError.unsupportedSchema("\(name): array without items")
             }
-            let limit = (raw["maxItems"] as? Int).map { max(0, $0) } ?? defaultMaxItems
-            return .array(items: try node(items, definitions: definitions, name: name, depth: depth + 1), maxItems: limit)
+            let limit = (raw["maxItems"] as? Int).map { max(0, $0) } ?? maxItems
+            return .array(items: try node(items, definitions: definitions, name: name, depth: depth + 1, maxItems: maxItems), maxItems: limit)
         case "object":
             let properties = raw["properties"] as? [String: Any] ?? [:]
             let order = orderedNames(raw, properties: properties)
@@ -74,7 +89,7 @@ indirect enum JSONSchemaNode: Equatable, Sendable {
                 guard let child = properties[key] as? [String: Any] else {
                     throw LanguageModelError.unsupportedSchema("\(name): property \(key) has no schema")
                 }
-                return Property(name: key, node: try node(child, definitions: definitions, name: name, depth: depth + 1))
+                return Property(name: key, node: try node(child, definitions: definitions, name: name, depth: depth + 1, maxItems: maxItems))
             })
         case let other:
             throw LanguageModelError.unsupportedSchema("\(name): unsupported type \(other ?? "nil")")
@@ -117,6 +132,8 @@ extension JSONSchemaNode {
         case .string: return "jstr"
         case .boolean: return #"("true" | "false")"#
         case .integer: return #"("0" | [1-9] [0-9]{0,8})"#
+        case .nullable(let inner):
+            return "(" + rule(for: inner, rules: &rules) + " | \"null\")"
         case .enumeration(let options):
             return "(" + options.map { Self.literal(Self.quote($0)) }.joined(separator: " | ") + ")"
         case .array(let items, let maxItems):

@@ -5,7 +5,7 @@ import os
 
 extension LocalBackendFactory {
     /// The shipping factory: `LocalCleanupBackend` (MLX, speculation on) in front of Apple FM.
-    /// The only place in the app that imports HushyModelsMLX.
+    /// The only place in the app that imports HushyModelsMLX (the debug-only meeting harness reads its timings).
     static var mlx: LocalBackendFactory {
         LocalBackendFactory(
             isRuntimeAvailable: { LocalCleanupBackend.runtimeAvailable },

@@ -29,7 +29,13 @@ final class FinalizeRunner {
     var isLive: (Int64) -> Bool = { _ in false }
     /// Title and transcript in, summary out. Tests replace it to hold a summary open while something else happens.
     var summarize: (_ transcript: String, _ fallbackTitle: String) async -> ExtractiveSummarizer.Output = {
-        await SmartCleaner.summarize($0, fallbackTitle: $1)
+        await FinalizeRunner.summary($0, fallbackTitle: $1)
+    }
+    /// The note's facts from its turns (`MeetingFactExtractor`), with the extractor's name; `ran` is false when no
+    /// model could answer, and then nothing is replaced. Tests replace it.
+    var extractFacts: (_ turns: NoteTranscript, _ noteId: Int64, _ title: String, _ kind: String) async
+        -> (facts: [MeetingFact], extractor: String, ran: Bool) = { turns, id, title, kind in
+        await FinalizeRunner.facts(turns, noteId: id, title: title, kind: kind)
     }
     /// What the Apple Notes export runs through. Tests replace it so no export reaches the Notes app.
     var appleNotesScripter: any AppleNotesScripting = AppleNotesExporter.defaultScripter
@@ -130,7 +136,7 @@ final class FinalizeRunner {
             do {
                 try await perform(step, note: note)
                 let journal = try store.captureJournal(noteId: noteId)
-                let hasTurns = !(try store.turns(noteId: noteId)).isEmpty
+                let hasTurns = try store.hasTurns(noteId: noteId)
                 let next = FinalizePlan.next(after: step, journal: journal, hasTurns: hasTurns, isLive: false)
                 if next == .done { _ = try store.setNoteStatus(id: noteId, .ready) }
                 if next != step {
@@ -156,7 +162,8 @@ final class FinalizeRunner {
         case .sealing:
             guard let folder = note.audioPath.map({ URL(fileURLWithPath: $0, isDirectory: true) }) else { return }
             let outcome = try CaptureJournalAdopter.adopt(
-                store: store, noteId: id, folder: folder, key: encryption.currentKey, readLegacy: Self.readLegacy)
+                store: store, noteId: id, folder: folder, key: encryption.currentKey, readLegacy: Self.readLegacy,
+                legacyStream: note.source == .file ? .file : .mic)
             // Audio adopted from a build before the journal supersedes the transcript it saved: the one legacy turn
             // goes, and both sides are recognised again into capture turns (whose places it would otherwise hold).
             if outcome.legacy > 0 { try store.replaceTurns(noteId: id, turns: []) }
@@ -171,11 +178,38 @@ final class FinalizeRunner {
         case .writing:
             guard try store.note(id: id) != nil else { return }
             _ = await write(note)
+            if note.source == .file { try keepFileTitle(note) }
         case .exporting:
             if let current = try store.note(id: id) { export(current) }
         case .capturing, .done, .needsAttention:
             return
         }
+    }
+
+    /// An imported file keeps its file name as its title (the import spec), not the summary's.
+    private func keepFileTitle(_ note: Note) throws {
+        guard let id = note.id, var current = try store.note(id: id), current.title != note.title else { return }
+        current.title = note.title
+        _ = try store.update(current)
+    }
+
+    /// The summary over the turns, without decision lines: decisions are facts now, with their quotes.
+    nonisolated static func summary(_ transcript: String, fallbackTitle: String) async -> ExtractiveSummarizer.Output {
+        var configuration = NoteSummarizer.Configuration()
+        configuration.decisionsInSummary = false
+        return await NoteSummarizer.summarize(
+            transcript, fallbackTitle: fallbackTitle, model: LanguageModels.meeting, configuration: configuration).output
+    }
+
+    nonisolated static func facts(_ turns: NoteTranscript, noteId: Int64, title: String, kind: String) async
+        -> (facts: [MeetingFact], extractor: String, ran: Bool) {
+        let model = LanguageModels.meeting
+        guard model.isAvailable, !turns.isEmpty else { return ([], "", false) }
+        let extractor = MeetingFactExtractor(model: model)
+        let (facts, report) = await extractor.extract(turns, noteId: noteId, title: title, kind: kind)
+        // Every call failed: keep what the note had rather than replace it with nothing.
+        let ran = report.chunks > 0 && report.failedChunks < report.chunks
+        return (facts, MeetingFactExtractor.extractorName(for: model), ran)
     }
 
     nonisolated static let readLegacy: CaptureJournalAdopter.LegacyReader = { url, key in try WAVWriter.read(url, key: key) }
@@ -217,25 +251,26 @@ final class FinalizeRunner {
         let micWords = Self.timings(capture.filter { $0.stream == .mic })
         let systemWords = Self.timings(capture.filter { $0.stream == .system })
         let folder = note.audioPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let key = encryption.currentKey
+        let audio = SideAudio.journal(journal, folder: folder, key: encryption.currentKey, readLegacy: Self.readLegacy)
         let diarizer = self.diarizer
         let store = self.store
         let owner = settings.userName
         let clean = NoteRecorder.cleaner(level: settings.noteCleanupLevel)
         let shouldDiarize = FeatureFlags.speakerLabels
         let voices = encryption.voiceSignatureStore
-        await foreground?.waitUntilIdle(pollInterval: .milliseconds(50))
+        // Diarization pauses at its next window while a dictation is in progress, and goes on where it stopped.
+        let yield = Self.yield(to: foreground)
+        await yield()
         await Task.detached(priority: .utility) {
             await diarizer.assembleAndSave(
                 note: note, micWords: micWords, systemWords: systemWords, isTwoChannel: isTwoChannel, ownerName: owner,
-                diarize: shouldDiarize, clean: clean, store: store,
-                loadAudio: { stream in
-                    guard let folder else { return [] }
-                    return try CaptureSegmentAudio.timeline(journal, stream: stream, folder: folder, key: key,
-                                                            readLegacy: FinalizeRunner.readLegacy)
-                },
-                voiceSignatureStore: voices)
+                diarize: shouldDiarize, clean: clean, store: store, audio: audio, yield: yield, voiceSignatureStore: voices)
         }.value
+    }
+
+    /// Waits while a dictation is in progress: the safe point heavy finalize work calls between its pieces.
+    nonisolated static func yield(to foreground: ForegroundActivity?) -> @Sendable () async -> Void {
+        { await foreground?.waitUntilIdle(pollInterval: .milliseconds(50)) }
     }
 
     /// The non-echo words of turns, in time order, as the assembler reads them.

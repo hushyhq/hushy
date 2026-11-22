@@ -8,12 +8,15 @@ struct LiveMeetingState {
     var startedAt: Date
     var capture: MeetingCapture
     var progress: MeetingTranscriptProgress
-    var turns: [NoteRecorder.LiveTurn]
+    /// The note's capture turns by `t0`, from the store (`LiveTurnReader`).
+    var turns: [NoteTurn]
     var jots: [MeetingJot]
     var consent: MeetingConsent?
 
     @MainActor
-    static func from(_ recorder: NoteRecorder, jots: [MeetingJot], consent: MeetingConsent?, now: Date) -> LiveMeetingState? {
+    static func from(
+        _ recorder: NoteRecorder, turns: [NoteTurn], jots: [MeetingJot], consent: MeetingConsent?, now: Date
+    ) -> LiveMeetingState? {
         guard let note = recorder.activeNote else { return nil }
         let startedAt = note.createdAt
         return LiveMeetingState(
@@ -22,7 +25,7 @@ struct LiveMeetingState {
             progress: MeetingTranscriptProgress(
                 recordedSeconds: now.timeIntervalSince(startedAt), transcribedSeconds: recorder.transcribedSeconds,
                 chunkSeconds: NoteRecorder.chunkSeconds),
-            turns: recorder.liveTurns, jots: jots, consent: consent)
+            turns: turns, jots: jots, consent: consent)
     }
 }
 
@@ -212,17 +215,18 @@ private struct MeetingLiveTranscript: View {
     @ViewBuilder
     private var turnList: some View {
         let list = VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ForEach(state.turns.suffix(isSnapshot ? 6 : 200)) { turn in
+            ForEach(state.turns.suffix(isSnapshot ? 6 : 200), id: \.ordinal) { turn in
+                let isYou = turn.stream != .system
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(turn.side == .you ? "You" : "Call").font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(turn.side == .you ? Theme.textPrimary : Theme.speakerColors[0])
-                        Text(MeetingMoment.clock(turn.startSeconds)).font(.system(size: 10, design: .monospaced))
+                        Text(isYou ? "You" : "Call").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(isYou ? Theme.textPrimary : Theme.speakerColors[0])
+                        Text(MeetingMoment.clock(turn.t0 ?? 0)).font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.textTertiary)
                     }
                     Text(turn.text).font(.system(size: 13)).foregroundStyle(Theme.textTertiary).lineSpacing(3)
                 }
-                .id(turn.id)
+                .id(turn.ordinal)
             }
         }
         if isSnapshot {
@@ -231,7 +235,7 @@ private struct MeetingLiveTranscript: View {
             ScrollViewReader { proxy in
                 ScrollView { list.frame(maxWidth: .infinity, alignment: .leading) }
                     .onChange(of: state.turns.count) { _, _ in
-                        if let last = state.turns.last { withAnimation(Theme.settle) { proxy.scrollTo(last.id, anchor: .bottom) } }
+                        if let last = state.turns.last { withAnimation(Theme.settle) { proxy.scrollTo(last.ordinal, anchor: .bottom) } }
                     }
             }
         }

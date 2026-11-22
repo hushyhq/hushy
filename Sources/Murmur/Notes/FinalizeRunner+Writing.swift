@@ -20,7 +20,9 @@ extension FinalizeRunner {
         return written
     }
 
-    /// The summary, title, action items and language, written in one update. Nil when the note is gone.
+    /// The summary, title and language in one update, then the note's facts (decisions, action items, open questions,
+    /// each with its quote and moment) from one extraction over the same turns. The legacy action-item columns become a
+    /// cache of the visible actions. Nil when the note is gone.
     func write(_ note: Note) async -> Note? {
         var note = (note.id.flatMap { try? store.note(id: $0) }) ?? note
         let turns = note.id.flatMap { try? store.transcript(noteId: $0) } ?? NoteTranscript(turns: [])
@@ -33,29 +35,42 @@ extension FinalizeRunner {
         note.title = titleAfterSummary(for: note, digestTitle: digest.title)
         note.summary = digest.summary
         note.setActionItems(from: digest)
+        let saved: Note
         do {
-            guard let saved = try store.update(note) else {
+            guard let updated = try store.update(note) else {
                 log.notice("note was deleted before its summary was saved; nothing written")
                 return nil
             }
-            return saved.caching(turns)
+            saved = updated
         } catch {
             log.error("saving the summary failed: \(error.localizedDescription)")
             return note
         }
+        guard let id = saved.id else { return saved.caching(turns) }
+        await foreground?.waitUntilIdle(pollInterval: .milliseconds(50))
+        let journal = try? store.captureJournal(noteId: id)
+        let extracted = await extractFacts(turns, id, saved.title, journal?.capturesCall == true ? "call" : "meeting")
+        guard extracted.ran else { return saved.caching(turns) }
+        do {
+            guard try store.note(id: id) != nil else { return nil }
+            try store.replaceModelFactsAndCache(noteId: id, extractor: extracted.extractor, facts: extracted.facts)
+        } catch {
+            log.error("saving the meeting facts failed: \(error.localizedDescription)")
+        }
+        return ((try? store.note(id: id)) ?? saved)?.caching(turns)
     }
 
     /// Markdown and Apple Notes, each when it is on and the note is still stored.
     func export(_ note: Note) {
         guard let id = note.id else { return }
         let turns = (try? store.transcript(noteId: id)) ?? NoteTranscript(turns: [])
-        let done = (try? store.doneActionItemIndexes(noteId: id)) ?? []
+        let facts = (try? store.facts(noteId: id)) ?? []
         if settings.exportNotesToMarkdown, isStillStored(note, before: "Markdown") {
-            do { try MarkdownExporter.export(note, transcript: turns, to: settings.exportDirectory, done: done) }
+            do { try MarkdownExporter.export(note, transcript: turns, facts: facts, to: settings.exportDirectory) }
             catch { log.error("exporting note failed: \(error.localizedDescription)") }
         }
         if settings.saveNotesToAppleNotes, isStillStored(note, before: "Apple Notes") {
-            do { try AppleNotesExporter.export(note, transcript: turns, done: done, using: appleNotesScripter) }
+            do { try AppleNotesExporter.export(note, transcript: turns, facts: facts, using: appleNotesScripter) }
             catch { log.error("saving note to Apple Notes failed: \(error.localizedDescription)") }
         }
     }

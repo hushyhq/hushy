@@ -1012,7 +1012,9 @@ private struct NoteActions: View {
             Menu {
                 if canExport {
                     Button("Copy as Markdown") {
-                        TextInserter.copy(MarkdownExporter.markdown(for: note, done: note.id.flatMap { model.library.doneActionItemsByNote[$0] } ?? []))
+                        TextInserter.copy(MarkdownExporter.markdown(
+                            for: note, transcript: note.id.flatMap { try? model.store.transcript(noteId: $0) },
+                            facts: note.id.flatMap { try? model.store.facts(noteId: $0) }))
                         show("Copied")
                     }
                     // Subtitles only make sense for a note with real word timings — an imported
@@ -1081,7 +1083,9 @@ private struct NoteActions: View {
 
     private func saveToAppleNotes() {
         do {
-            try AppleNotesExporter.export(note, done: model.library.doneActionItemsByNote[note.id ?? 0] ?? [])
+            try AppleNotesExporter.export(
+                note, transcript: note.id.flatMap { try? model.store.transcript(noteId: $0) },
+                facts: note.id.flatMap { try? model.store.facts(noteId: $0) })
             show("Added to Apple Notes")
         } catch let error as AppleNotesExporter.ExportError {
             notesProblem = error.result

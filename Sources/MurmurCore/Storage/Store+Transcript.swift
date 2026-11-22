@@ -100,7 +100,8 @@ extension Store {
                 segmentOrdinal += 1
             }
             try Self.assignOneToOne(db, noteId: noteId, assembly: assembly, speakerIds: speakerIds)
-            try Self.materializeTranscript(db, noteId: noteId)
+            let transcript = try Self.materializeTranscript(db, noteId: noteId)
+            try Self.reresolveFactEvidence(db, noteId: noteId, transcript: transcript)
             return true
         }
     }

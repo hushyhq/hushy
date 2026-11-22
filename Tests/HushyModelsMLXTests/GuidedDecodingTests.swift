@@ -10,7 +10,7 @@ struct GuidedDecodingTests {
     static let productionSchemas = [
         SmartCleaner.Cleaned.generationSchema, SmartCleaner.RerankAnswer.generationSchema,
         MeetingPartNotes.generationSchema, MeetingDigest.generationSchema, MeetingMerge.generationSchema, ModeExecutor.Transformed.generationSchema,
-        GeneratedActionEnvelope.generationSchema,
+        GeneratedActionEnvelope.generationSchema, MeetingExtractAnswer.generationSchema,
     ]
 
     private func run(
@@ -86,6 +86,19 @@ struct GuidedDecodingTests {
         #expect(grammar.contains(#""{\"keeps\":""#))
         #expect(grammar.contains(#"",\"droppedInformation\":""#))
         #expect(!grammar.contains("ws"))
+    }
+
+    @Test("MeetingRecords: a nullable owner and due decode as null or a string, and a chunk may list many records")
+    func meetingRecords() throws {
+        let grammar = try JSONSchemaNode.parse(MeetingExtractAnswer.generationSchema).compactEBNF()
+        #expect(grammar.contains(#"| "null")"#))
+        #expect(grammar.contains("{0,\(JSONSchemaNode.meetingRecordsMaxItems - 1)}"))
+        let target = #"{"records":[{"kind":"action","text":"Send it.","owner":null,"due":"Friday","quote":"send it by Friday"},{"kind":"decision","text":"Ship.","owner":"You","due":null,"quote":"we ship"}]}"#
+        let (json, _, _) = try run(MeetingExtractAnswer.generationSchema, target: target, maxTokens: 600)
+        #expect(json == target)
+        let answer = try JSONDecoder().decode(MeetingExtractAnswer.self, from: Data(json.utf8))
+        #expect(answer.records.map(\.owner) == [nil, "You"])
+        #expect(answer.records.map(\.due) == ["Friday", nil])
     }
 
     @Test("Cleaned: structure is jump-forwarded, the model writes only the text")

@@ -168,7 +168,7 @@ public struct MCPServer: Sendable {
              required: ["query"]),
         tool("list_notes", "List recent recorded notes and meetings, newest first.",
              properties: ["limit": integer("Max results (default 20)")], required: []),
-        tool("get_note", "Get a note's full transcript, summary and action items by id (checked-off items are marked [x]).",
+        tool("get_note", "Get a note's full transcript, summary, decisions and action items by id (checked-off items are marked [x]; each item links to its moment and quotes what was said).",
              properties: ["id": integer("The note id from search_notes or list_notes")], required: ["id"]),
         tool("get_insights", "Usage statistics: words dictated, words per minute, streaks and app breakdown.",
              properties: [:], required: []),
@@ -192,13 +192,15 @@ public struct MCPServer: Sendable {
             return notes.isEmpty ? "No notes recorded yet." : notes.map(noteSummary).joined(separator: "\n\n")
         case "get_note":
             guard let id = arguments["id"] as? Int else { throw ToolError(message: "Missing integer argument: id") }
-            let (note, done, transcript) = try reader.read { db in
-                (try Note.fetchOne(db, key: Int64(id)), try Self.doneItems(db, noteId: Int64(id)),
-                 try Store.transcript(db, noteId: Int64(id)))
+            let (note, facts, transcript, done) = try reader.read { db in
+                (try Note.fetchOne(db, key: Int64(id)), try Store.visibleFacts(db, noteId: Int64(id)),
+                 try Store.transcript(db, noteId: Int64(id)),
+                 Set(try NoteActionItemStatus.filter(Column("noteId") == Int64(id) && Column("isDone") == true).fetchAll(db).map(\.itemIndex)))
             }
             guard let note else { throw ToolError(message: "No note with id \(id).") }
-            // The same Markdown as the export, from the turns: both sides of a call, by name.
-            return MarkdownExporter.markdown(for: note, transcript: transcript, done: done)
+            // The same Markdown as the export, from the turns (both sides of a call, by name) and the visible facts,
+            // each with its [mm:ss] link and quote.
+            return MarkdownExporter.markdown(for: note, transcript: transcript, facts: facts, done: done)
         case "get_insights":
             let items = try reader.read { db in try Dictation.fetchAll(db) }
             let insights = Insights.compute(from: items)
@@ -230,12 +232,6 @@ public struct MCPServer: Sendable {
             throw ToolError(message: "Missing string argument: \(key)")
         }
         return value
-    }
-
-    /// Indexes of the note's checked-off action items.
-    static func doneItems(_ db: Database, noteId: Int64) throws -> Set<Int> {
-        let rows = try NoteActionItemStatus.filter(Column("noteId") == noteId && Column("isDone") == true).fetchAll(db)
-        return Set(rows.map(\.itemIndex))
     }
 
     /// The summary, else the start of the transcript cache (the first turns, rendered).

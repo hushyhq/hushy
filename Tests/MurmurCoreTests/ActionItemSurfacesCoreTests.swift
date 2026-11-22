@@ -25,24 +25,6 @@ struct ActionItemSurfacesCoreTests {
         #expect(!ActionItemDetail(owner: "You", task: "t").isOwned(by: []))
     }
 
-    @Test("re-summary: a kept item with its own fields keeps them; one without drops the note's fields")
-    func mixedResummary() {
-        let kept = [ActionItemDetail(owner: "Leo", task: "Book the room", due: "Friday"), ActionItemDetail(task: "Ship it")]
-        let labelled = [ActionItemDetail(owner: "Priya", task: "Draft the note")]
-        let withFields = DiarizedDigest.mergeList(
-            kept.map(\.line), details: kept, done: [0, 1], labelled: labelled.map(\.line), labelledDetails: labelled)
-        #expect(withFields.items == ["Priya: Draft the note", "Leo: Book the room — Friday", "Ship it"])
-        #expect(withFields.details == labelled + kept)
-        // The same list built from a note that had no fields: lines only, in the same order.
-        let withoutFields = DiarizedDigest.mergeList(
-            kept.map(\.line), details: nil, done: [0, 1], labelled: labelled.map(\.line), labelledDetails: labelled)
-        #expect(withoutFields.items == withFields.items)
-        #expect(withoutFields.details == nil)
-        #expect(withoutFields.done == withFields.done)
-        // Labelled lines that have no fields never get any.
-        #expect(DiarizedDigest.mergeList(kept.map(\.line), details: kept, done: [0], labelled: ["x"], labelledDetails: nil).details == nil)
-    }
-
     @Test("MCP get_note marks checked-off items and keeps owner and due in the line")
     func mcpGetNote() throws {
         let store = try Store()

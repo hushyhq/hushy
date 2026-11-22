@@ -75,10 +75,12 @@ final class MeetingAudioPlayer {
         }
     }
 
-    /// A journal's audio rows as spans on the note clock: each microphone segment at its `t0`, with the call segment
-    /// that starts closest to it. Nil when the journal holds no audio (a legacy note: its chunk files are read).
+    /// A journal's audio rows as spans on the note clock: each microphone segment (an imported file's segment) at its
+    /// `t0`, with the call segment that starts closest to it. Nil when the journal holds no audio (a legacy note: its
+    /// chunk files are read).
     nonisolated static func spans(journal: CaptureJournal, folder: URL) -> [ChunkSpan]? {
-        let mic = journal.audio(.mic).filter { $0.state != .open }
+        let recorded = journal.audio(.mic).filter { $0.state != .open }
+        let mic = recorded.isEmpty ? journal.audio(.file).filter { $0.state != .open } : recorded
         guard !mic.isEmpty else { return nil }
         let system = journal.audio(.system).filter { $0.state != .open }
         return mic.compactMap { segment in

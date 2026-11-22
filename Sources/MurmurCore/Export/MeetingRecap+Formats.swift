@@ -85,10 +85,12 @@ extension MeetingRecap {
             result.append(RecapBlock(
                 heading: "Summary", style: summaryPoints.count == 1 ? .paragraph : .bullets, lines: summaryPoints))
         }
+        if !decisions.isEmpty { result.append(RecapBlock(heading: "Decisions", style: .bullets, lines: decisions)) }
         if !actionItems.isEmpty {
             result.append(RecapBlock(
                 heading: "Action items", style: .checklist, lines: actionItems, done: actionDone, details: actionDetails))
         }
+        if !openQuestions.isEmpty { result.append(RecapBlock(heading: "Open questions", style: .bullets, lines: openQuestions)) }
         if let transcript {
             let paragraphs = transcript.components(separatedBy: .newlines).map(Self.trimmed).filter { !$0.isEmpty }
             result.append(RecapBlock(heading: "Transcript", style: .prose, lines: paragraphs))

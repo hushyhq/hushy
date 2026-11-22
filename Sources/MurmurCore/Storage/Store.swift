@@ -1041,6 +1041,11 @@ extension Store {
                 try turn.insert(db)
                 copy.transcript = try Self.materializeTranscript(db, noteId: id).rendered
             }
+            // A note that arrives with items (an Ask answer kept as a note, an import of an older note, a fixture) gets
+            // them as facts, the same rows v29 gave every older note, so every reader reads facts only.
+            if let id = copy.id, !copy.actionItems.isEmpty || copy.summary.contains("Decided:") {
+                _ = try LegacyFactBackfill.run(db, noteId: id)
+            }
             return copy
         }
     }
@@ -1132,7 +1137,10 @@ extension Store {
         }
     }
 
+    /// Checks legacy item `itemIndex` off (or reopens it), on its fact too, so the fact and the index-keyed row agree.
     public func setActionItemDone(noteId: Int64, itemIndex: Int, isDone: Bool) throws {
+        let fact = try writer.read { db in try Self.actionFact(db, noteId: noteId, index: itemIndex) }
+        if let fact, try setActionFactDone(uuid: fact.uuid, isDone: isDone) { return }
         try writer.write { db in
             if isDone {
                 try NoteActionItemStatus(noteId: noteId, itemIndex: itemIndex, isDone: true).save(db)
@@ -1391,7 +1399,9 @@ extension Store {
                 sql: "UPDATE note_speaker SET displayName = ? WHERE id = ?",
                 arguments: [trimmed.isEmpty ? nil : trimmed, id])
             if let noteId = try Int64.fetchOne(db, sql: "SELECT noteId FROM note_speaker WHERE id = ?", arguments: [id]) {
-                try Self.materializeTranscript(db, noteId: noteId)
+                let transcript = try Self.materializeTranscript(db, noteId: noteId)
+                // A fact owned by this speaker shows the name the speaker is now shown with.
+                if let shown = transcript.names[id] { try Self.renameFactOwners(db, noteId: noteId, speakerId: id, to: shown) }
             }
         }
     }

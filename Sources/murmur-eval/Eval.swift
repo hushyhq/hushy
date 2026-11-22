@@ -270,6 +270,7 @@ struct Eval {
             case "sealed-parity": try await SealedParity.run(args)
             case "residency-probe": try await ResidencyProbe.run(args)
             case "meeting": try await MeetingRunner.run(args)
+            case "prefill-yield": try await PrefillYieldProbe.run(args)
             case "meeting-jev": try await MeetingJevJudge.run(args)
             case "external": try await ExternalRunner.run(args)
             default:

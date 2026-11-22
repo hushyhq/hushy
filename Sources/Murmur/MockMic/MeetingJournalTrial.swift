@@ -1,5 +1,7 @@
 #if DEBUG
 import Foundation
+import HushyModelsApple
+import HushyModelsMLX
 import MurmurCore
 
 /// `Murmur --meeting-journal <mode> --report <dir> --clips <dir> [--seconds N] [--trials N]`: the capture journal's
@@ -13,6 +15,9 @@ import MurmurCore
 /// - `memory`: a synthetic two-channel call of `--seconds`, sampling `phys_footprint`, then its finalize.
 /// - `dictation`: dictations at idle, during a recording, and while a meeting is finalized.
 ///
+/// `--local-model-dir <dir>` puts dictation cleanup and the meeting summary on one local 4B (the shared-model risk);
+/// `--synthetic-mic` replaces BlackHole with a synthetic microphone (every mode but `record` already uses one).
+///
 /// Clips (16 kHz WAV, invented speech from `say`): `mic.wav`, `call.wav`, `dictation.wav`.
 @MainActor
 enum MeetingJournalTrial {
@@ -22,6 +27,11 @@ enum MeetingJournalTrial {
         let clips: URL
         let seconds: Double?
         let trials: Int
+        /// `--local-model-dir <dir>`: dictation cleanup and meeting summaries both on this local 4B, wired the way the
+        /// app wires it (`LocalBackendFactory.mlx`, `MeetingLanguageModel` routed to the shared model). Apple FM otherwise.
+        let localModel: URL?
+        /// `--speed N` (memory): the synthetic call plays N times faster than real time. 1 is the gate measurement.
+        let speed: Int
     }
 
     static func requested(_ arguments: [String]) -> Bool { arguments.contains("--meeting-journal") }
@@ -33,7 +43,9 @@ enum MeetingJournalTrial {
         }
         guard let mode = value("--meeting-journal"), let report = value("--report"), let clips = value("--clips") else { return nil }
         return Arguments(mode: mode, report: URL(fileURLWithPath: report), clips: URL(fileURLWithPath: clips),
-                         seconds: value("--seconds").flatMap(Double.init), trials: value("--trials").flatMap(Int.init) ?? 10)
+                         seconds: value("--seconds").flatMap(Double.init), trials: value("--trials").flatMap(Int.init) ?? 10,
+                         localModel: value("--local-model-dir").map { URL(fileURLWithPath: $0, isDirectory: true) },
+                         speed: value("--speed").flatMap(Int.init) ?? 1)
     }
 
     static func launch(_ arguments: [String]) -> Never {
@@ -49,7 +61,13 @@ enum MeetingJournalTrial {
 
     static func execute(_ arguments: Arguments) async -> Int32 {
         if let reason = MockMicRun.homeRefusal() { return say("refused: \(reason)", MockMicExit.refused) }
-        guard case .use(let device) = MockMicDeviceRule.decide(MockMicDevices.inputDevices()) else {
+        let device: MockMicDevice
+        if case .use(let found) = MockMicDeviceRule.decide(MockMicDevices.inputDevices()) {
+            device = found
+        } else if ProcessInfo.processInfo.arguments.contains("--synthetic-mic") || arguments.mode != "record" {
+            // Only `record` opens a device; the other modes feed synthetic sources, so a missing BlackHole costs nothing.
+            device = MockMicDevice(id: 0, name: "synthetic", isVirtual: true, inputChannels: 0)
+        } else {
             return say("skipped: no BlackHole 2ch input", MockMicExit.skipped)
         }
         guard MockMicManifest.isAllowedAudioPath(arguments.clips.path, realSupport: MockMicHome.realSupport.path),
@@ -64,11 +82,12 @@ enum MeetingJournalTrial {
             let violations = rig.isolationViolations()
             guard violations.isEmpty else { return say("refused: \(violations.joined(separator: "; "))", MockMicExit.refused) }
             guard SpeechEngine.isCached(.ultra) else { return say("skipped: speech model missing", MockMicExit.skipped) }
-            // Nothing downloads here: speaker labels (whose models may not be on this Mac) stay off in the throwaway
-            // suite, so a two-channel note is assembled as You and Speaker 1 without diarization.
-            FeatureFlags.source.set(false, forKey: "feature.speakerLabels")
+            // Nothing downloads here: speaker labels run only when their models (the legacy diarizer's and Nemotron 3's)
+            // are already on this Mac; otherwise a two-channel note is assembled as You and Speaker 1 without
+            // diarization. The report says which (`speakerLabels`).
+            FeatureFlags.source.set(MockMicPreflight.speakerModelsCached, forKey: "feature.speakerLabels")
             try await rig.prepareSpeech()
-            let trial = Runner(rig: rig, arguments: arguments)
+            let trial = try Runner(rig: rig, arguments: arguments)
             let report: [String: Any]
             switch arguments.mode {
             case "record": report = try await trial.record()
@@ -76,6 +95,7 @@ enum MeetingJournalTrial {
             case "health": report = try await trial.health()
             case "memory": report = try await trial.memory()
             case "dictation": report = try await trial.dictation()
+            case "dictation-paired": report = try await trial.pairedDictation()
             default: return say("unknown mode \(arguments.mode)", MockMicExit.usage)
             }
             let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
@@ -84,6 +104,22 @@ enum MeetingJournalTrial {
         } catch {
             return say("failed: \(error)", MockMicExit.failed)
         }
+    }
+
+    /// The app's local cleanup chain (`LocalBackendFactory.mlx`: the 4B in front of Apple FM), from a model folder on
+    /// disk. The 4B is the only entry whose summaries share the cleanup model (`ModelTierPolicy.meetingUsesCleanupModel`).
+    static func localModel(directory: URL, callLog: ModelCallLog) throws
+        -> (model: any LanguageModel, entry: LocalModelEntry, mlx: MLXLanguageModel?) {
+        guard let entry = ModelRegistry.entry(id: ModelRegistry.hushyCleanup4B) else {
+            throw MockMicAudioError(description: "no registry entry for the 4B")
+        }
+        let factory = LocalBackendFactory.mlx
+        guard factory.isRuntimeAvailable() else { throw MockMicAudioError(description: "mlx.metallib is not beside the binary") }
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("config.json").path) else {
+            throw MockMicAudioError(description: "no model at --local-model-dir")
+        }
+        let built = factory.make(entry, directory, AppleFoundationModel(), nil, callLog, nil)
+        return (built.model, entry, built.memory as? MLXLanguageModel)
     }
 
     static func say(_ message: String, _ code: Int32) -> Int32 {

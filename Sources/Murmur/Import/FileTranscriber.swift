@@ -1,41 +1,32 @@
-import CryptoKit
 import Foundation
 import MurmurCore
 import Observation
 import os
 
-/// Transcribes an imported audio/video file into a `Note`, reusing the same 30 s progressive-
-/// chunking shape as `NoteRecorder` (see its doc comment) so a multi-hour file transcribes with
-/// constant memory rather than needing its whole decoded waveform in memory at once.
+/// Transcribes an imported audio/video file into a `Note` the way a recording is made (meetings schema freeze
+/// sections 3 and 4): the decoded audio goes into the capture journal as `capture_segment(stream = 'file')` rows and
+/// `seg-<seq>-file.hseg` files (`CaptureJournalWriter`, cut at pauses about every 30 s), each sealed segment is
+/// recognised into its import turn as it comes (`SegmentTranscriber`), and the note is finished by the same
+/// `FinalizeRunner` steps as a recording (sealing, transcribing, assembling, writing, exporting). So Try again,
+/// playback and Erase read the same journal, and a multi-hour file never sits in memory: at most one open segment.
 ///
-/// Decode → chunk → transcribe all run off the main actor at utility priority (`Task.detached`
-/// plus a `nonisolated` `run()`), since a multi-hour import should not compete with UI work or
-/// with an active dictation for scheduling priority. Progress and cancellation are surfaced
-/// through `@Observable` state (updated via `MainActor.run` hops) so `ImportQueue`/the import UI
-/// can show a progress bar with a Cancel button per file.
+/// Decode → journal → recognise run off the main actor at utility priority (`Task.detached` plus a `nonisolated`
+/// `run()`), and recognition waits for a dictation in progress before each segment, as a recording's does. Progress
+/// and cancellation are surfaced through `@Observable` state so `ImportQueue`/the import UI can show a progress bar
+/// with a Cancel button per file.
 ///
-/// **Storage choice**: like `NoteRecorder`, this does not copy the *original* file into app
-/// storage — only the re-encoded 16 kHz mono chunk WAVs it produces while transcribing (same
-/// `chunk-%04d.wav` layout under `Notes/<noteId>/`), which is what History's retry-from-chunks
-/// path already knows how to read. This keeps a multi-hour import from doubling the user's disk
-/// usage (the file plus a full copy), matches the storage model recordings already use, and means
-/// the note is fully self-contained afterward — the original file can move, be renamed, or be
-/// deleted without breaking retry or the note's own audio playback. The trade-off is that "Show
-/// original file" is only offered while `sourcePath` still resolves; if the user moves/deletes the
-/// source after import, the note itself (transcript, summary, chunk audio) is unaffected. This is
-/// documented instead of using a security-scoped bookmark because bookmarks are for *repeated,
-/// indefinite* access to a user-picked location (e.g. an app that keeps reopening a folder) — this
-/// feature reads the source file exactly once, during import, so a bookmark would only add API
-/// surface without a matching benefit; a plain path (resolved once, at import time, while the
-/// sandbox/Open Panel access grant is still active) is all this needs.
+/// **Storage choice**: the original file is not copied into app storage, only the 16 kHz mono journal segments
+/// under `Notes/<noteId>/`, so a multi-hour import does not double the user's disk usage and the note is
+/// self-contained afterward: the original can move or be deleted without breaking retry or playback. "Show original
+/// file" is offered only while `sourcePath` still resolves. The source is read exactly once, during import, so a
+/// plain path is all this needs (a security-scoped bookmark is for repeated access).
+///
+/// A cancelled or failed import keeps the segments it wrote and ends needing attention (failed, with Try again),
+/// which recognises what was saved. Imports from before the journal (`chunk-%04d.wav` files) are adopted as `file`
+/// rows by the runner's sealing step on Try again, and play from their chunk files until then.
 @MainActor
 @Observable
 final class FileTranscriber {
-    /// One chunk of decoded audio waiting to be cut and transcribed, matching `NoteRecorder`'s
-    /// pause-aware cut so an import's chunk boundaries don't land mid-word any more than a live
-    /// recording's do.
-    nonisolated static let chunkSeconds: Double = 30
-
     enum State: Equatable {
         case idle
         case decoding(progress: Double?)
@@ -56,22 +47,22 @@ final class FileTranscriber {
     @ObservationIgnored private let encryption: EncryptionController
     @ObservationIgnored private let vocabulary: VocabularyContext
     @ObservationIgnored private let cleanupLevel: CleanupLevel
-    @ObservationIgnored private let settings: AppSettings
+    @ObservationIgnored private let finalizer: FinalizeRunner
     @ObservationIgnored private nonisolated let log = Logger(subsystem: "app.hushy", category: "file-import")
     @ObservationIgnored private var task: Task<Void, Never>?
 
     init(
         fileURL: URL, speech: SpeechEngine, store: Store, settings: AppSettings,
-        encryption: EncryptionController, vocabulary: VocabularyContext
+        encryption: EncryptionController, vocabulary: VocabularyContext, finalizer: FinalizeRunner
     ) {
         self.fileURL = fileURL
         self.displayName = fileURL.deletingPathExtension().lastPathComponent
         self.pipeline = DictationPipeline(transcriber: speech)
         self.store = store
-        self.settings = settings
         self.encryption = encryption
         self.vocabulary = vocabulary
         self.cleanupLevel = settings.noteCleanupLevel
+        self.finalizer = finalizer
     }
 
     var isRunning: Bool {
@@ -96,79 +87,48 @@ final class FileTranscriber {
         task?.cancel()
     }
 
-    /// The whole decode/chunk/transcribe pipeline, `nonisolated` so it genuinely runs off the
-    /// main actor (a `Task.detached` calling an `@MainActor` method would just hop back to the
-    /// main actor for the method's whole body). Every touch of actor-isolated state — `store`,
-    /// `settings`, `encryption`, and `self.state` itself — goes through an explicit
-    /// `MainActor.run` hop; everything else (decoding, chunk splitting, ASR, cleanup) runs on
-    /// whatever executor the detached task was given.
+    /// Decoded audio goes to the journal a tick at a time, so the writer can cut each segment at a pause.
+    nonisolated static let tickSamples = Int(StreamingResampler.targetRate)
+
+    /// The whole decode/journal/recognise pipeline, `nonisolated` so it genuinely runs off the main actor (a
+    /// `Task.detached` calling an `@MainActor` method would just hop back to the main actor for the method's whole
+    /// body). Every touch of actor-isolated state goes through an explicit `MainActor.run` hop.
     nonisolated private func run() async {
-        var noteID: Int64?
+        var started: (note: Note, journal: CaptureJournalWriter)?
         do {
-            let note = try await createNote()
-            noteID = note.id
+            let (note, journal, foreground) = try await createNote()
+            started = (note, journal)
+            guard let id = note.id else { throw CaptureSession.Failure.noNote }
             let estimatedDuration = try? await MediaDecoder.duration(of: fileURL)
-
-            let folder = URL(fileURLWithPath: note.audioPath ?? "", isDirectory: true)
-            let key = await MainActor.run { self.encryption.currentKey }
-            var chunkIndex = 0
-            var pending: [Float] = []
-            var totalSamples = 0
-            var tally = ImportChunkTally()
+            let transcriber = SegmentTranscriber(
+                pipeline: pipeline, store: store, vocabulary: vocabulary, clean: NoteRecorder.cleaner(level: cleanupLevel))
             let sampleRate = StreamingResampler.targetRate
-            let chunkSamples = Int(Self.chunkSeconds * sampleRate)
-
+            var totalSamples = 0
             await updateState(.decoding(progress: 0))
-
             for try await chunk in MediaDecoder.stream(contentsOf: fileURL) {
                 try Task.checkCancellation()
-                pending.append(contentsOf: chunk)
                 totalSamples += chunk.count
                 if let estimatedDuration, estimatedDuration > 0 {
-                    let progress = min(1, Double(totalSamples) / sampleRate / estimatedDuration)
-                    await updateState(.decoding(progress: progress))
+                    await updateState(.decoding(progress: min(1, Double(totalSamples) / sampleRate / estimatedDuration)))
                 }
-                let (readyChunks, leftover) = ImportChunker.cutChunks(
-                    pending: pending, totalDecodedSamples: totalSamples, chunkSamples: chunkSamples, sampleRate: sampleRate)
-                pending = leftover
-                for readyChunk in readyChunks {
-                    do {
-                        let result = try await transcribe(
-                            readyChunk.samples, chunkIndex: chunkIndex, folder: folder, key: key,
-                            offsetSeconds: readyChunk.offsetSeconds)
-                        tally.record(text: result.text, words: result.words)
-                    } catch {
-                        tally.recordFailure()
-                        log.error("import chunk \(chunkIndex) failed: \(error.localizedDescription)")
-                    }
-                    chunkIndex += 1
+                var offset = 0
+                while offset < chunk.count {
+                    let end = min(chunk.count, offset + Self.tickSamples)
+                    await recognise(try await journal.append(.file, Array(chunk[offset..<end])), transcriber, foreground)
+                    offset = end
                 }
             }
-
             try Task.checkCancellation()
-
-            // Final partial chunk.
-            if !pending.isEmpty {
-                let offsetSeconds = ImportChunker.finalChunkOffsetSeconds(
-                    totalDecodedSamples: totalSamples, remainingSamples: pending.count, sampleRate: sampleRate)
-                do {
-                    let result = try await transcribe(pending, chunkIndex: chunkIndex, folder: folder, key: key, offsetSeconds: offsetSeconds)
-                    tally.record(text: result.text, words: result.words)
-                } catch {
-                    tally.recordFailure()
-                    log.error("import final chunk failed: \(error.localizedDescription)")
-                }
-            }
-
-            let durationSeconds = Double(totalSamples) / sampleRate
+            await recognise(try await journal.sealAll(), transcriber, foreground)
             await updateState(.transcribing(progress: 1))
-            try await finalize(note: note, tally: tally, durationSeconds: durationSeconds)
+            let status = try await finish(noteId: id, durationSeconds: Double(totalSamples) / sampleRate)
+            await updateState(ImportOutcome.finalState(noteID: id, status: status))
         } catch is CancellationError {
-            await markFailed(noteID: noteID)
+            await markIncomplete(started, reason: "cancelled")
             await MainActor.run { self.state = .cancelled }
         } catch {
             log.error("import failed: \(error.localizedDescription)")
-            await markFailed(noteID: noteID)
+            await markIncomplete(started, reason: "importFailed")
             let message = error.localizedDescription
             await MainActor.run { self.state = .failed(message) }
         }
@@ -178,95 +138,58 @@ final class FileTranscriber {
         await MainActor.run { self.state = newState }
     }
 
-    nonisolated private func createNote() async throws -> Note {
+    /// The note (titled with the file's name), its journal at `capturing`, and the dictation flag recognition yields to.
+    nonisolated private func createNote() async throws -> (Note, CaptureJournalWriter, ForegroundActivity?) {
         try await MainActor.run {
             var note = Note(
                 title: self.displayName, createdAt: Date(), status: .recording,
                 source: .file, sourcePath: self.fileURL.path)
             note = try self.store.save(note)
-            let folder = AppPaths.notesAudioDirectory.appendingPathComponent("\(note.id ?? 0)", isDirectory: true)
+            guard let id = note.id else { throw CaptureSession.Failure.noNote }
+            let folder = AppPaths.notesAudioDirectory.appendingPathComponent("\(id)", isDirectory: true)
             note.audioPath = folder.path
             note = try self.store.save(note)
-            return note
+            try self.store.advanceFinalize(noteId: id, from: nil, to: .capturing, pipelineVersion: Store.finalizePipelineVersion)
+            let journal = CaptureJournalWriter(
+                store: self.store, noteId: id, folder: folder, key: self.encryption.currentKey, streams: [.file])
+            return (note, journal, self.finalizer.foreground)
         }
     }
 
-    /// One chunk's cleaned text plus its word timings, shifted to whole-file-relative seconds.
-    private struct ChunkResult {
-        let text: String
-        let words: [WordTiming]
-        static let empty = ChunkResult(text: "", words: [])
-    }
-
-    /// Writes the chunk's WAV (same layout as `NoteRecorder`, so retry-from-chunks works
-    /// identically) and transcribes it with word timings (`DictationPipeline.transcribeRawWithTimings`,
-    /// the same shared path `NoteRecorder` uses for live recordings — see
-    /// `.claude/DECISIONS.md`'s file-import/speaker-labels reconciliation entry), offsetting
-    /// those timings by `offsetSeconds` so they read as absolute positions in the whole file.
-    nonisolated private func transcribe(
-        _ samples: [Float], chunkIndex: Int, folder: URL, key: SymmetricKey?, offsetSeconds: Double
-    ) async throws -> ChunkResult {
-        guard !samples.isEmpty else { return .empty }
-        try WAVWriter.write(samples, to: folder.appendingPathComponent(String(format: "chunk-%04d.wav", chunkIndex)), key: key)
-        let result = try await pipeline.transcribeRawWithTimings(samples, vocabulary: vocabulary)
-        let options = CleanupOptions(level: cleanupLevel, voiceCommandsEnabled: false)
-        let cleaned = TextCleaner(options: options).clean(result.text).text
-        let words = (result.timings ?? []).map {
-            WordTiming(word: $0.word, start: $0.start + offsetSeconds, end: $0.end + offsetSeconds)
+    /// Recognises sealed segments in order, each after any dictation in progress. A segment that fails three times is
+    /// a failed gap and the note goes on, as a recording's does.
+    nonisolated private func recognise(
+        _ sealed: [CaptureJournalWriter.Sealed], _ transcriber: SegmentTranscriber, _ foreground: ForegroundActivity?
+    ) async {
+        for part in sealed {
+            await foreground?.waitUntilIdle(pollInterval: .milliseconds(50))
+            _ = await transcriber.transcribe(part.segment, samples: part.samples)
         }
-        return ChunkResult(text: cleaned, words: words)
     }
 
-    nonisolated private func finalize(note: Note, tally: ImportChunkTally, durationSeconds: Double) async throws {
-        let transcript = tally.transcript
-        let words = tally.words
-        let digest = await SmartCleaner.summarize(transcript, fallbackTitle: displayName)
-        let finalStatus = tally.finalStatus
-
-        let result: State = try await MainActor.run {
-            var updated = note
-            if let id = note.id {
-                // The file's words are the note's one import turn; the transcript is its cache.
-                let turn = NoteTurn(
-                    noteId: id, ordinal: 0, stream: .file, t0: 0, t1: durationSeconds, text: transcript,
-                    words: words.isEmpty ? nil : words.map { NoteTurn.Word(w: $0.word, start: $0.start, end: $0.end, conf: 1) },
-                    origin: .imported)
-                try self.store.replaceTurns(noteId: id, turns: transcript.isEmpty ? [] : [turn])
+    /// Hands the note to the finalize runner (the steps a recording takes after stop) and returns its end status.
+    nonisolated private func finish(noteId: Int64, durationSeconds: Double) async throws -> Note.Status {
+        let run = try await MainActor.run { () -> Task<FinalizeStep, Never> in
+            if var note = try self.store.note(id: noteId) {
+                note.durationSeconds = durationSeconds
+                _ = try self.store.update(note)
             }
-            updated.durationSeconds = durationSeconds
-            updated.summary = digest.summary
-            updated.setActionItems(from: digest)
-            // Unlike a live recording, an imported file keeps its original filename as the
-            // title (per the feature spec) rather than adopting the summarizer's generated one.
-            updated.status = finalStatus
-            updated = try self.store.save(updated)
-            if let id = updated.id, !words.isEmpty {
-                // One note_segment row per word, speakerId nil (a file import never runs
-                // diarization — see .claude/DECISIONS.md). Reuses the same
-                // replaceSpeakerSegments(noteId:speakers:segments:) API SpeakerDiarizer uses for
-                // live recordings, with an empty speaker roster and speakerIndex nil throughout;
-                // AlignedSegment.speakerLabel is unused when speakerIndex is nil.
-                let wordSegments = words.map { (speakerIndex: Int?.none, segment: AlignedSegment(speakerLabel: "", start: $0.start, end: $0.end, text: $0.word)) }
-                try self.store.replaceSpeakerSegments(noteId: id, speakers: [], segments: wordSegments)
-            }
-            if updated.status == .ready, self.settings.exportNotesToMarkdown, let id = updated.id {
-                _ = try? MarkdownExporter.export(updated, transcript: try? self.store.transcript(noteId: id), to: self.settings.exportDirectory)
-            }
-            return ImportChunkTally.finalState(noteID: updated.id, status: finalStatus)
+            try self.store.advanceFinalize(
+                noteId: noteId, from: .capturing, to: .sealing, pipelineVersion: Store.finalizePipelineVersion)
+            return self.finalizer.run(noteId: noteId)
         }
-        await MainActor.run { self.state = result }
+        _ = await run.value
+        return await MainActor.run { (try? self.store.note(id: noteId))?.status ?? .failed }
     }
 
-    /// A cancelled or failed import keeps whatever chunk audio/transcript it produced so far —
-    /// same "recover, don't discard" policy `NoteRecorder` uses for a failed recording — rather
-    /// than deleting the note. The user can retry transcription from the saved chunks, or delete
-    /// it from Notes like any other incomplete recording.
-    nonisolated private func markFailed(noteID: Int64?) async {
-        guard let noteID else { return }
+    /// A cancelled or failed import: what was decoded is sealed and kept, and the note ends needing attention (failed,
+    /// with Try again), so the runner never finishes it on its own as if it were the whole file.
+    nonisolated private func markIncomplete(_ started: (note: Note, journal: CaptureJournalWriter)?, reason: String) async {
+        guard let started, let id = started.note.id else { return }
+        _ = try? await started.journal.sealAll()
         await MainActor.run {
-            guard var note = try? self.store.note(id: noteID) else { return }
-            note.status = .failed
-            _ = try? self.store.save(note)
+            try? self.store.setFinalize(noteId: id, step: .needsAttention, reason: reason)
+            _ = try? self.store.setNoteStatus(id: id, .failed)
         }
     }
 }

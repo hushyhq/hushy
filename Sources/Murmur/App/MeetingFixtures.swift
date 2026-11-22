@@ -125,12 +125,16 @@ enum MeetingFixtures {
         var capture = MeetingCapture(startedAt: started, isCapturingCall: true)
         capture.heard(.microphone, rms: 0.2, at: now.addingTimeInterval(-1))
         if callHeard { capture.heard(.call, rms: 0.2, at: now.addingTimeInterval(-2)) }
-        let turns: [NoteRecorder.LiveTurn] = [
-            .init(part: 21, side: .call, startSeconds: 630, text: "so legal came back and they're fine with the pilot terms as written"),
-            .init(part: 22, side: .you, startSeconds: 660, text: "great that unblocks the december first start then"),
-            .init(part: 23, side: .call, startSeconds: 690, text: "lee still owes you the user list he said monday"),
-            .init(part: 24, side: .you, startSeconds: 720, text: "and i sent the security answers yesterday did they land"),
+        let lines: [(seq: Int, stream: NoteTurn.Stream, text: String)] = [
+            (21, .system, "so legal came back and they're fine with the pilot terms as written"),
+            (22, .mic, "great that unblocks the december first start then"),
+            (23, .system, "lee still owes you the user list he said monday"),
+            (24, .mic, "and i sent the security answers yesterday did they land"),
         ]
+        let turns = lines.map { line in
+            NoteTurn(noteId: 9_999, ordinal: NoteTurn.captureOrdinal(seq: line.seq, stream: line.stream == .system ? .system : .mic),
+                     stream: line.stream, t0: Double(line.seq) * 30, t1: Double(line.seq + 1) * 30, text: line.text, origin: .capture)
+        }
         let jots = [
             MeetingJot(id: 1, noteId: 9_999, atSeconds: 95, text: "legal OK on terms"),
             MeetingJot(id: 2, noteId: 9_999, atSeconds: 410, text: "? does the pilot include their EU team"),

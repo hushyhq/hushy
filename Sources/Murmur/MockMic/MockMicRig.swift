@@ -26,6 +26,18 @@ enum MockMicPreflight {
             FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
         }
     }
+
+    /// Nemotron 3's compiled bundle for the shipped preset, where FluidAudio keeps it. Existence only; nothing is read.
+    static var nemotronModelsCached: Bool {
+        let config = SpeakerDiarizerConstants.nemotronConfig
+        let repo = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FluidAudio/Models").appendingPathComponent(Repo.nemotron3Diarization.folderName)
+        let bundle = repo.appendingPathComponent(config.hubSubdirectory).appendingPathComponent(config.modelFileName)
+        return FileManager.default.fileExists(atPath: bundle.appendingPathComponent("coremldata.bin").path)
+    }
+
+    /// Speaker labels run only when every model they would load is already on this Mac, so a trial never downloads.
+    static var speakerModelsCached: Bool { diarizerModelsCached && nemotronModelsCached }
 }
 
 /// The few pieces of the app the harness builds itself, in place of `AppModel`: no window, menu bar

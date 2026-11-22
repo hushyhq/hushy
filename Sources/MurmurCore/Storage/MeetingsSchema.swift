@@ -232,7 +232,8 @@ enum LegacyFactBackfill {
         var due: String?
     }
 
-    static func run(_ db: Database) throws -> Report {
+    /// Every note (the migration), or one note (`noteId`: a note inserted with items, `Store.save`).
+    static func run(_ db: Database, noteId: Int64? = nil) throws -> Report {
         var report = Report()
         let doneAt = try doneItems(db)
         let jots = try decisionJots(db)
@@ -252,7 +253,9 @@ enum LegacyFactBackfill {
             report.facts += 1
         }
 
-        let notes = try Row.fetchCursor(db, sql: "SELECT id, summary, actionItems, actionItemDetails, updatedAt FROM note")
+        let notes = try Row.fetchCursor(
+            db, sql: "SELECT id, summary, actionItems, actionItemDetails, updatedAt FROM note" + (noteId == nil ? "" : " WHERE id = ?"),
+            arguments: StatementArguments(noteId.map { [$0] } ?? []))
         while let row = try notes.next() {
             let noteId: Int64 = row["id"]
             let stamp: DatabaseValue = row["updatedAt"]

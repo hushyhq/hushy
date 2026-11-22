@@ -1,26 +1,62 @@
 #if DEBUG
 import Foundation
+import HushyModelsMLX
 import MurmurCore
+import Synchronization
 
 extension MeetingJournalTrial {
     @MainActor
     final class Runner {
         let rig: MockMicRig
         let arguments: Arguments
-        let foreground = ForegroundActivity()
+        let foreground: ForegroundActivity
+        /// Every model call's leg and outcome (never text), so a dictation can tell the 4B answered it.
+        let callLog: ModelCallLog
+        /// What dictations clean with: the rig's Apple FM, or the local 4B chain.
+        let cleanupModel: any LanguageModel
+        /// "apple", or "local:<id>" when summaries share the 4B with dictation.
+        let summaryModelLabel: String
+        /// Summary calls that began on the shared 4B (`MeetingLanguageModel`'s `respondBegins`).
+        let summaryCalls: CallCounter
+        /// The 4B under the chain, for each dictation's in-engine timings (nil on Apple FM).
+        let mlx: MLXLanguageModel?
         var recorder: NoteRecorder { rig.recorder }
 
-        init(rig: MockMicRig, arguments: Arguments) {
+        init(rig: MockMicRig, arguments: Arguments) throws {
             self.rig = rig
             self.arguments = arguments
+            let foreground = ForegroundActivity(), callLog = ModelCallLog(capacity: 4_096)
+            self.foreground = foreground
+            self.callLog = callLog
+            let counter = CallCounter()
+            self.summaryCalls = counter
             rig.recorder.finalizer.foreground = foreground
+            guard let directory = arguments.localModel else {
+                mlx = nil
+                cleanupModel = rig.cleanupModel
+                summaryModelLabel = "apple"
+                return
+            }
+            let shared = try MeetingJournalTrial.localModel(directory: directory, callLog: callLog)
+            let meeting = MeetingLanguageModel(
+                shared: shared.model, apple: rig.cleanupModel, activity: foreground, respondBegins: { counter.add() })
+            meeting.route(for: .local(shared.entry.id))
+            guard meeting.route == .sharedLocal else { throw MockMicAudioError(description: "summaries would not share the 4B") }
+            LanguageModels.current = shared.model
+            LanguageModels.meeting = meeting
+            rig.recorder.finalizer.summarize = { await SmartCleaner.summarize($0, fallbackTitle: $1, model: meeting) }
+            cleanupModel = shared.model
+            mlx = shared.mlx
+            summaryModelLabel = "local:\(shared.entry.id)"
         }
 
         func clip(_ name: String) throws -> [Float] {
             try MockMicAudio.readMono(arguments.clips.appendingPathComponent(name), rate: 16_000)
         }
 
-        func synthetic(_ name: String) throws -> SyntheticNoteSource { SyntheticNoteSource(samples: try clip(name)) }
+        func synthetic(_ name: String, speed: Int = 1) throws -> SyntheticNoteSource {
+            SyntheticNoteSource(samples: try clip(name), speed: speed)
+        }
 
         // MARK: record / resume
 
@@ -172,15 +208,17 @@ extension MeetingJournalTrial {
         // MARK: memory
 
         func memory() async throws -> [String: Any] {
-            let mic = try synthetic("mic.wav")
-            let call = try synthetic("call.wav")
+            // `--speed N` plays the call N times faster than real time: the note holds `--seconds` of audio either way.
+            let speed = max(1, arguments.speed)
+            let mic = try synthetic("mic.wav", speed: speed)
+            let call = try synthetic("call.wav", speed: speed)
             recorder.makeMicSource = { mic }
             recorder.makeCallSource = { call }
             let base = MeetingJournalTrial.footprintMB()
             try await recorder.start()
             guard let id = recorder.activeNote?.id else { throw MockMicRecordingError.noNote }
             let began = ContinuousClock.now
-            let seconds = arguments.seconds ?? 3_600
+            let seconds = (arguments.seconds ?? 3_600) / Double(speed)
             var capturePeak = 0.0
             var samples: [[Double]] = []
             var ticks = 0
@@ -193,24 +231,58 @@ extension MeetingJournalTrial {
             }
             recorder.stop()
             let finalizeBegan = ContinuousClock.now
-            var finalizePeak = 0.0
+            let steps = StepPeaks()
+            let store = rig.store
             let watcher = Task { @MainActor in
                 while !Task.isCancelled {
-                    finalizePeak = max(finalizePeak, MeetingJournalTrial.footprintMB())
-                    try? await Task.sleep(for: .milliseconds(500))
+                    let step = (try? store.finalizeState(noteId: id)?.step.rawValue) ?? "none"
+                    steps.record(step: step, mb: MeetingJournalTrial.footprintMB(), at: mockMicSeconds(since: finalizeBegan))
+                    try? await Task.sleep(for: .milliseconds(100))
                 }
             }
             try await waitForFinish(id, timeout: .seconds(3_600))
             watcher.cancel()
             var row = try describe(id)
-            row["seconds"] = seconds
+            row["seconds"] = seconds * Double(speed)
+            row["speed"] = speed
             row["baseMB"] = base
             row["capturePeakMB"] = capturePeak
-            row["finalizePeakMB"] = finalizePeak
+            row["finalizePeakMB"] = steps.peak
+            row["finalizeStepPeaksMB"] = steps.peaks
+            row["finalizeStepSeconds"] = steps.seconds
             row["finalizeSeconds"] = mockMicSeconds(since: finalizeBegan)
+            row["finalizeTimeline"] = steps.timeline
             row["timeline"] = samples
+            row["summaryModel"] = summaryModelLabel
+            row["speakerLabels"] = FeatureFlags.speakerLabels
             return row
         }
     }
+}
+
+/// Peak footprint per finalize step, sampled by the memory trial (counts only).
+@MainActor
+final class StepPeaks {
+    private(set) var peaks: [String: Double] = [:]
+    private(set) var seconds: [String: Double] = [:]
+    private(set) var timeline: [[String: Any]] = []
+    private var last: (step: String, at: Double)?
+
+    var peak: Double { peaks.values.max() ?? 0 }
+
+    func record(step: String, mb: Double, at: Double) {
+        peaks[step] = max(peaks[step] ?? 0, mb)
+        if let last { seconds[last.step, default: 0] += at - last.at }
+        if last?.step != step || timeline.isEmpty || at - ((timeline.last?["at"] as? Double) ?? 0) >= 5 {
+            timeline.append(["at": at.rounded(), "step": step, "mb": mb.rounded()])
+        }
+        last = (step, at)
+    }
+}
+/// Counts summary calls as they begin on the shared model.
+final class CallCounter: Sendable {
+    private let count = Mutex(0)
+    var begun: Int { count.withLock { $0 } }
+    func add() { count.withLock { $0 += 1 } }
 }
 #endif

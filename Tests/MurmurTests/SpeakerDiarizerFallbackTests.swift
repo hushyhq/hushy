@@ -73,6 +73,6 @@ struct SpeakerDiarizerFallbackTests {
     private func assemble(_ diarizer: SpeakerDiarizer, _ note: Note, _ words: [MurmurCore.WordTiming], _ store: Store) async -> Bool {
         await diarizer.assembleAndSave(
             note: note, micWords: words, systemWords: [], isTwoChannel: false, ownerName: nil, diarize: true,
-            clean: { $0 }, store: store, loadAudio: { _ in [Float](repeating: 0.1, count: 16_000) })
+            clean: { $0 }, store: store, audio: .constant([Float](repeating: 0.1, count: 16_000)))
     }
 }

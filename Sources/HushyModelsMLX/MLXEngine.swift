@@ -5,7 +5,7 @@ import MLXLLM
 import MLXLMCommon
 import MurmurCore
 
-/// Owns one loaded MLX model, its tokenizer and the LRU of prefilled instruction prefixes.
+/// Owns one loaded MLX model, its tokenizer and the cache of prefilled instruction prefixes (`PrefixCacheStore`).
 ///
 /// Runs on its own serial dispatch queue: MLX evaluation is synchronous GPU work, so it gets a
 /// dedicated thread instead of blocking a cooperative-pool thread, and every MLX call happens on
@@ -13,7 +13,12 @@ import MurmurCore
 actor MLXEngine {
     struct Settings: Sendable {
         var directory: URL
-        var prefixCacheCapacity = 4
+        /// Cached prefixes of cleanup's own prompts (`PrefixSlot.pinned`): the plain prompt and the three register
+        /// lines. Nothing but another cleanup prompt evicts one.
+        var pinnedPrefixCapacity = 4
+        /// Cached prefixes of every other prompt a person waits on (`PrefixSlot.transient`): actions, voice edit,
+        /// restyle. Background calls use neither (`PrefixPolicy.background`).
+        var transientPrefixCapacity = 2
         /// Quantize prefix KV caches to this many bits (4 or 8); nil keeps them in the model dtype.
         var kvCacheBits: Int?
         /// Prefill chunk size for instruction prefixes; cancellation is checked between chunks.
@@ -21,6 +26,9 @@ actor MLXEngine {
         /// Prompts longer than twice this are prefilled in chunks of this size before decoding
         /// (`prefillLeading`); the decoder's first pass then sees only the last chunk.
         var promptChunk = 512
+        /// The same for work no one waits on (`PrefixPolicy.background`: a meeting summary or extract). Smaller, so a
+        /// dictation that cancels the call waits for at most one such forward pass (`promptPlan`).
+        var backgroundPromptChunk = 128
         /// MLX's GPU buffer cache limit (it otherwise grows toward available memory).
         var bufferCacheLimitBytes = 256 * 1024 * 1024
         /// Grammar for the tools-v1 envelope (`ToolEnvelopeGrammar`).
@@ -60,6 +68,9 @@ actor MLXEngine {
         var earlySampledTokens: Int
         /// Prompt-lookup speculation counters; nil when the call decoded without it.
         var speculation: SpeculationStats?
+        /// Each prompt chunk fed before decoding (`prefillLeading`), in milliseconds, and its size in tokens.
+        var leadChunkMilliseconds: [Double] = []
+        var leadChunkTokens = 0
     }
 
     private final class CachedPrefix {
@@ -102,12 +113,14 @@ actor MLXEngine {
     private let queue = DispatchSerialQueue(label: "app.hushy.mlx", qos: .userInitiated)
     nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
-    let settings: Settings
+    private(set) var settings: Settings
     private var state = LoadState.idle
     private var prefixes: PrefixCacheStore<CachedPrefix>
     /// Measurement only (`murmur-eval intent-app --ab argmax`): decode the old way, masking each row before argmax.
     private var measurementMasksFirst = false
     func setMeasurementMasksFirst(_ on: Bool) { measurementMasksFirst = on }
+    /// Measurement only (`murmur-eval prefill-yield`): the background prompt chunk for the calls that follow.
+    func setMeasurementBackgroundPromptChunk(_ tokens: Int) { settings.backgroundPromptChunk = max(1, tokens) }
     private(set) var loadMilliseconds: Double = 0
     /// This chip's forward-pass cost curve for speculation (`Speculation/`), measured once.
     private(set) var passCosts: PassCostModel?
@@ -116,7 +129,8 @@ actor MLXEngine {
 
     init(settings: Settings, loadModel: (@Sendable (URL) async -> Handoff)? = nil) {
         self.settings = settings
-        self.prefixes = PrefixCacheStore(capacity: settings.prefixCacheCapacity)
+        self.prefixes = PrefixCacheStore(
+            pinnedCapacity: settings.pinnedPrefixCapacity, transientCapacity: settings.transientPrefixCapacity)
         let sealed = settings.sealedKeys.map { (settings.sealedModelID ?? settings.directory.lastPathComponent, $0) }
         self.loadModel = loadModel ?? { directory in await MLXEngine.loadModel(directory, sealed: sealed) }
     }
@@ -296,31 +310,40 @@ actor MLXEngine {
     /// SPIKE: LoRA layers of a loaded adapter, cached for a cheap per-call toggle.
     private var adapterLayers: [LoRALayer] = []
 
-    /// SPIKE: under `adapterScope == "tools"`, turns the adapter on only for the tools envelope.
+    /// The per-call adapter toggle. `tools`: on only for the tools-v1 envelope (SPIKE). `meeting-records`: the meeting
+    /// extract adapter (Run A), on only for `MeetingExtractPrompt.schemaName` calls, so no dictation, summary or prefix
+    /// build ever runs with it. A nil schema (a call that builds no prefix) is never an adapter call. Called after
+    /// `loaded()` and before any forward pass, with no suspension in between, so a call always runs in its own scope.
     private func applyAdapterScope(_ schema: GenerationSchemaSpec?) {
-        guard !adapterLayers.isEmpty, settings.adapterScope == "tools" else { return }
-        let enabled = schema?.name == VoiceToolCatalog.envelopeSchema.name
+        guard !adapterLayers.isEmpty else { return }
+        let enabled: Bool
+        switch settings.adapterScope {
+        case "tools": enabled = schema?.name == VoiceToolCatalog.envelopeSchema.name
+        case Self.meetingRecordsScope: enabled = schema?.name == MeetingExtractPrompt.schemaName
+        default: return
+        }
         guard adapterLayers.first?.loraEnabled != enabled else { return }
         for layer in adapterLayers { layer.loraEnabled = enabled }
     }
 
-    func warm(system: String, schema: GenerationSchemaSpec? = nil, calibrateSpeculation: Bool = false) async throws {
+    static let meetingRecordsScope = "meeting-records"
+
+    func warm(system: String, schema: GenerationSchemaSpec, calibrateSpeculation: Bool = false) async throws {
         let loaded = try await loaded()
         applyAdapterScope(schema)
-        let built = try prefix(for: system, loaded: loaded, policy: .warmUp)
+        let built = try prefix(for: system, schema: schema, loaded: loaded, policy: .warmUp)
         if calibrateSpeculation, passCosts == nil, let entry = built?.0 {
             passCosts = MLXSpeculativeContext.calibrate(model: loaded.context.model, cache: entry.cache.map { $0.copy() }) ?? .m4ProDefault
         }
-        if let schema {
-            _ = try loaded.grammars.withConstraint(for: schema) { constraint, _ in try constraint.computeMask() }
-        }
+        _ = try loaded.grammars.withConstraint(for: schema) { constraint, _ in try constraint.computeMask() }
     }
 
     /// One forward pass on a copy of the cached instructions. The response cache stays untouched.
-    func touchCachedPrefix(system: String) async throws {
+    func touchCachedPrefix(system: String, schema: GenerationSchemaSpec) async throws {
         let loaded = try await loaded()
         try Task.checkCancellation()
-        guard let prefix = try prefix(for: system, loaded: loaded, policy: .dictation)?.0,
+        applyAdapterScope(schema)
+        guard let prefix = try prefix(for: system, schema: schema, loaded: loaded, policy: .dictation)?.0,
               let token = prefix.tokens.last else { return }
         // Outside `withError` an MLX error (out of memory at key-down) ends the process; here it is thrown, and the caller
         // drops the warm-up.
@@ -349,23 +372,30 @@ actor MLXEngine {
     }
 
     /// The cached prefix of `system` and how long it took to build (0 on a hit); nil for a call that does not use the
-    /// cache (`PrefixPolicy.background`) or whose prompt has no prefix.
-    private func prefix(for system: String, loaded: Loaded, policy: PrefixPolicy) throws -> (CachedPrefix, Double)? {
+    /// cache (`PrefixPolicy.background`) or whose prompt has no prefix. `schema` picks the partition (`PrefixSlot`);
+    /// call it after `applyAdapterScope(schema)`, so the key carries this call's adapter state.
+    private func prefix(
+        for system: String, schema: GenerationSchemaSpec, loaded: Loaded, policy: PrefixPolicy
+    ) throws -> (CachedPrefix, Double)? {
+        let adapterOn = ["tools", Self.meetingRecordsScope].contains(settings.adapterScope) && adapterLayers.first?.loraEnabled == true
+        let (key, slot) = PrefixKey.filing(system: system, schema: schema, adapterOn: adapterOn)
         var elapsed = 0.0
-        let resolved = try prefixes.resolve(system, policy: policy) {
+        let resolved = try prefixes.resolve(key, slot: slot, policy: policy) {
             let start = ContinuousClock.now
-            guard let entry = try buildPrefix(for: system, loaded: loaded, policy: policy) else { return nil }
+            guard let entry = try buildPrefix(for: system, schema: schema, loaded: loaded, policy: policy) else { return nil }
             elapsed = Self.milliseconds(since: start)
             return entry
         }
         guard let resolved else { return nil }
         if resolved.built {
-            MLXLog.model.info("mlx prefix built tokens=\(resolved.entry.tokens.count, privacy: .public) ms=\(Int(elapsed), privacy: .public) cached=\(self.prefixes.count, privacy: .public)")
+            MLXLog.model.info("mlx prefix built tokens=\(resolved.entry.tokens.count, privacy: .public) ms=\(Int(elapsed), privacy: .public) slot=\(slot == .pinned ? "pinned" : "transient", privacy: .public) cached=\(self.prefixes.count, privacy: .public)")
         }
         return (resolved.entry, elapsed)
     }
 
-    private func buildPrefix(for system: String, loaded: Loaded, policy: PrefixPolicy) throws -> CachedPrefix? {
+    private func buildPrefix(
+        for system: String, schema: GenerationSchemaSpec, loaded: Loaded, policy: PrefixPolicy
+    ) throws -> CachedPrefix? {
         let tokens = try prefixTokens(system: system, tokenizer: loaded.context.tokenizer)
         guard !tokens.isEmpty else { return nil }
         let model = loaded.context.model
@@ -373,7 +403,7 @@ actor MLXEngine {
         try withError {
             try Self.prefill(
                 count: tokens.count, chunk: settings.prefillChunk, policy: policy,
-                rebuild: { Task { try? await self.warm(system: system) } }
+                rebuild: { Task { try? await self.warm(system: system, schema: schema) } }
             ) { range in
                 _ = model(MLXArray(tokens[range].map(Int32.init))[.newAxis], cache: cache)
                 eval(cache)
@@ -424,7 +454,7 @@ actor MLXEngine {
         var use = CallReport.PrefixUse.disabled
         var prefixMs = 0.0
         var prefixCount = 0
-        if usePrefixCache, let built = try prefix(for: system, loaded: loaded, policy: policy) {
+        if usePrefixCache, let built = try prefix(for: system, schema: schema, loaded: loaded, policy: policy) {
             let (prefix, builtMs) = built
             prefixMs = builtMs
             switch PrefixReuse.plan(prefix: prefix.tokens, prompt: full) {
@@ -448,7 +478,9 @@ actor MLXEngine {
         }
 
         let promptCount = suffix.count
-        suffix = try prefillLeading(suffix, model: loaded.context.model, cache: cache)
+        let plan = Self.promptPlan(count: suffix.count, policy: policy, settings: settings)
+        let leadChunks = try prefillLeading(suffix, plan: plan, policy: policy, model: loaded.context.model, cache: cache)
+        suffix = Array(suffix[plan.lead...])
         var firstTokenAt: ContinuousClock.Instant?
         var early = EarlyTokenRecorder(start: start)
         let answerBudget = Self.maxAnswerTokens(promptTokens: full.count - prefixCount, schemaName: schema.name)
@@ -497,10 +529,11 @@ actor MLXEngine {
             json: json, prefixUse: use, prefixTokens: prefixCount, promptTokens: promptCount,
             generatedTokens: result.sampled, forcedTokens: result.forced, loadMilliseconds: loadMs, prefixMilliseconds: prefixMs,
             timeToFirstTokenMilliseconds: ttft, totalMilliseconds: total,
-            earlyTokens: earlyCount.total, earlySampledTokens: earlyCount.sampled, speculation: speculationStats)
+            earlyTokens: earlyCount.total, earlySampledTokens: earlyCount.sampled, speculation: speculationStats,
+            leadChunkMilliseconds: leadChunks, leadChunkTokens: plan.chunk)
         if let speculationStats { Self.log(speculationStats) }
         MLXLog.model.info(
-            "mlx call prefix=\(use.rawValue, privacy: .public) prefixTokens=\(prefixCount, privacy: .public) promptTokens=\(promptCount, privacy: .public) genTokens=\(result.sampled, privacy: .public) forcedTokens=\(result.forced, privacy: .public) loadMs=\(Int(loadMs), privacy: .public) prefixMs=\(Int(prefixMs), privacy: .public) ttftMs=\(Int(ttft), privacy: .public) totalMs=\(Int(total), privacy: .public) earlyTokens=\(earlyCount.total, privacy: .public) earlySampled=\(earlyCount.sampled, privacy: .public)")
+            "mlx call prefix=\(use.rawValue, privacy: .public) prefixTokens=\(prefixCount, privacy: .public) promptTokens=\(promptCount, privacy: .public) genTokens=\(result.sampled, privacy: .public) forcedTokens=\(result.forced, privacy: .public) loadMs=\(Int(loadMs), privacy: .public) prefixMs=\(Int(prefixMs), privacy: .public) ttftMs=\(Int(ttft), privacy: .public) totalMs=\(Int(total), privacy: .public) earlyTokens=\(earlyCount.total, privacy: .public) earlySampled=\(earlyCount.sampled, privacy: .public) leadChunks=\(leadChunks.count, privacy: .public)x\(plan.chunk, privacy: .public) leadChunkMaxMs=\(Int(leadChunks.max() ?? 0), privacy: .public)")
         return report
     }
 
@@ -512,10 +545,13 @@ actor MLXEngine {
         let start = ContinuousClock.now
         let wasLoaded = isLoaded
         let loaded = try await loaded()
+        applyAdapterScope(nil)
         let loadMs = wasLoaded ? 0 : Self.milliseconds(since: start)
         let full = try render(system: system, user: prompt, tokenizer: loaded.context.tokenizer)
         let cache = try loaded.context.model.newCache(parameters: nil)
-        var pending = try prefillLeading(full, model: loaded.context.model, cache: cache)
+        let plan = Self.promptPlan(count: full.count, policy: .dictation, settings: settings)
+        _ = try prefillLeading(full, plan: plan, policy: .dictation, model: loaded.context.model, cache: cache)
+        var pending = Array(full[plan.lead...])
         let context = MLXTokenContext(model: loaded.context.model, cache: cache)
         var output: [Int] = []
         var firstTokenAt: ContinuousClock.Instant?
@@ -540,6 +576,7 @@ actor MLXEngine {
     /// unmasked greedy pick at each of its positions when fed the prompt and the answer's earlier tokens.
     func teacherForcedPicks(system: String, prompt: String, answer: String) async throws -> (answer: [Int], picks: [Int]) {
         let loaded = try await loaded()
+        applyAdapterScope(nil)
         let tokenizer = loaded.context.tokenizer
         let promptTokens = try render(system: system, user: prompt, tokenizer: tokenizer)
         let answerTokens = tokenizer.encode(text: answer, addSpecialTokens: false)
@@ -568,26 +605,50 @@ actor MLXEngine {
         (Memory.activeMemory, Memory.peakMemory)
     }
 
-    /// Feeds all but the last `promptChunk` tokens of a long prompt (a meeting transcript) in
-    /// chunks, evaluating only the cache, and returns the tail for the decoder. Feeding it all at
-    /// once would make the first forward pass build a [tokens × vocabulary] logits matrix — about
-    /// 6 GB for a 12k-token prompt with Qwen3.5's 248k vocabulary — to read one row of it.
-    /// Cancellation is checked between chunks.
-    private func prefillLeading(_ tokens: [Int], model: any MLXLMCommon.LanguageModel, cache: [KVCache]) throws -> [Int] {
-        let chunk = settings.promptChunk
-        guard tokens.count > chunk * 2 else { return tokens }
-        let lead = tokens.count - chunk
+    /// How a prompt reaches the model before the decoder's first pass: the first `lead` tokens in chunks of `chunk`,
+    /// evaluating only the cache, then the rest (at most one chunk) as the decoder's first pass.
+    ///
+    /// - A dictation's prompt keeps `promptChunk` (512), fed in chunks only past twice that: one forward pass is
+    ///   cheaper than four, and the dictation is the call being waited on.
+    /// - A background prompt (`PrefixPolicy.background`: a summary or an extract, up to about 6k tokens) goes in
+    ///   chunks of `backgroundPromptChunk` (128) once it is longer than one, and the decoder's first pass sees at most
+    ///   one such chunk. The call checks for cancellation before every chunk and every decoded token, so a dictation
+    ///   that cancels it waits for at most one 128-token forward pass (meetings schema freeze section 8, "Preemption
+    ///   latency"), never a 512-token one.
+    struct PromptPlan: Equatable {
+        let chunk: Int
+        let lead: Int
+    }
+
+    static func promptPlan(count: Int, policy: PrefixPolicy, settings: Settings) -> PromptPlan {
+        if policy == .background {
+            let chunk = max(1, settings.backgroundPromptChunk)
+            return PromptPlan(chunk: chunk, lead: count > chunk ? count - chunk : 0)
+        }
+        let chunk = max(1, settings.promptChunk)
+        return PromptPlan(chunk: chunk, lead: count > chunk * 2 ? count - chunk : 0)
+    }
+
+    /// Feeds the first `plan.lead` tokens of a long prompt (a meeting transcript) in chunks, evaluating only the
+    /// cache; the caller hands the rest to the decoder. Feeding it all at once would make the first forward pass
+    /// build a [tokens × vocabulary] logits matrix — about 6 GB for a 12k-token prompt with Qwen3.5's 248k
+    /// vocabulary — to read one row of it. A cancelled caller stops before the next chunk (`prefill`). Returns each
+    /// chunk's milliseconds.
+    private func prefillLeading(
+        _ tokens: [Int], plan: PromptPlan, policy: PrefixPolicy, model: any MLXLMCommon.LanguageModel, cache: [KVCache]
+    ) throws -> [Double] {
+        guard plan.lead > 0 else { return [] }
+        var timings: [Double] = []
         try withError {
-            var offset = 0
-            while offset < lead {
-                try Task.checkCancellation()
-                let end = min(offset + chunk, lead)
-                _ = model(MLXArray(tokens[offset..<end].map(Int32.init))[.newAxis], cache: cache)
+            // A prompt is not a prefix: nothing to rebuild when the caller goes away.
+            try Self.prefill(count: plan.lead, chunk: plan.chunk, policy: policy == .warmUp ? .dictation : policy, rebuild: {}) { range in
+                let start = ContinuousClock.now
+                _ = model(MLXArray(tokens[range].map(Int32.init))[.newAxis], cache: cache)
                 eval(cache)
-                offset = end
+                timings.append(Self.milliseconds(since: start))
             }
         }
-        return Array(tokens[lead...])
+        return timings
     }
 
     /// Sampled-token budget for one answer: about twice the user prompt (cleanup answers are
@@ -604,6 +665,7 @@ actor MLXEngine {
     /// for an 18-word draft ran for the full 8 s ceiling). Other schemas keep `maxAnswerTokens(promptTokens:)`.
     static func maxAnswerTokens(promptTokens: Int, schemaName: String) -> Int {
         let general = maxAnswerTokens(promptTokens: promptTokens)
+        if schemaName == MeetingExtractPrompt.schemaName { return min(general, meetingRecordsAnswerTokens) }
         guard Self.cleanupSchemaNames.contains(schemaName) else { return general }
         return min(general, max(Self.minimumCleanupAnswerTokens, promptTokens + promptTokens / 4 + 16))
     }
@@ -611,6 +673,8 @@ actor MLXEngine {
     /// Schemas whose answer is the dictation's own text (`SmartCleaner.Cleaned` and `.GroupCleaned`).
     static let cleanupSchemaNames: Set<String> = [SmartCleaner.cleanedSchema.name, SmartCleaner.groupCleanedSchema.name]
     static let minimumCleanupAnswerTokens = 48
+    /// The meeting-extract eval's `MAX_NEW_TOKENS` (`scripts/meeting-extract/eval_ami_extract.py`).
+    static let meetingRecordsAnswerTokens = 1_500
 
     // MARK: - Vocabulary helpers
 

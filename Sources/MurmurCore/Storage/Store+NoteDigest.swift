@@ -57,6 +57,7 @@ extension Store {
             let shownAfter = try Self.materializeTranscript(db, noteId: speaker.noteId).names[id] ?? speaker.label
             let old = Array(Set([speaker.label] + [speaker.displayName, shownBefore].compactMap { $0 })).sorted()
             try rewriteDigest(db, noteId: speaker.noteId, from: old, to: shownAfter)
+            try Self.renameFactOwners(db, noteId: speaker.noteId, speakerId: id, to: shownAfter)
         }
     }
 
@@ -69,10 +70,13 @@ extension Store {
             try db.execute(
                 sql: "UPDATE note_segment SET speakerId = ? WHERE speakerId = ?", arguments: [targetId, sourceId])
             try db.execute(sql: "UPDATE turn SET speakerId = ? WHERE speakerId = ?", arguments: [targetId, sourceId])
+            try db.execute(sql: "UPDATE meeting_fact SET ownerSpeakerId = ? WHERE ownerSpeakerId = ?", arguments: [targetId, sourceId])
             try NoteSpeaker.deleteOne(db, key: sourceId)
             try Self.materializeTranscript(db, noteId: source.noteId)
             let old = [source.label] + (source.displayName.map { [$0] } ?? [])
             try rewriteDigest(db, noteId: source.noteId, from: old, to: target.displayLabel)
+            let shown = try Self.transcript(db, noteId: source.noteId).names[targetId] ?? target.displayLabel
+            try Self.renameFactOwners(db, noteId: source.noteId, speakerId: targetId, to: shown)
         }
     }
 
@@ -81,5 +85,11 @@ extension Store {
               var rewritten = DigestSpeakerRename.rewrite(note, from: old, to: new) else { return }
         rewritten.updatedAt = Date()
         try rewritten.updateBesideTranscript(db)
+    }
+
+    /// Facts owned by a speaker show the name that speaker is now shown with; the legacy columns follow.
+    static func renameFactOwners(_ db: Database, noteId: Int64, speakerId: Int64, to shown: String) throws {
+        try db.execute(sql: "UPDATE meeting_fact SET ownerText = ? WHERE ownerSpeakerId = ?", arguments: [shown, speakerId])
+        try cacheLegacyActionItems(db, noteId: noteId)
     }
 }

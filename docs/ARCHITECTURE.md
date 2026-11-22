@@ -85,7 +85,10 @@ checked by tests to classify into its own context.
 `hseg1` frame per side per tick, ~30 s segments sealed at a pause, `capture_segment` rows), recognises sealed
 segments in order, and watches each side with `CaptureHealth` (stall or exact zeros: rebuild, gap, warning). On stop,
 quit or a relaunch after a crash, `FinalizeRunner` takes the note from `note_finalize.step` through sealing,
-transcribing, assembling, writing and exporting (handbook: speakers-and-call-audio, "The capture journal"). Then `SmartCleaner.summarize` → `NoteSummarizer` (one call when the
+transcribing, assembling, writing and exporting (handbook: speakers-and-call-audio, "The capture journal").
+An imported file goes the same way (`FileTranscriber`: `file` segments, then the runner). Finalize yields to a
+dictation (recognition per segment, diarization per 10 s window, summaries cancelled and fed in 128-token chunks on
+the shared 4B) and never holds a whole side in memory (`StreamedDiarization` over `CaptureSegmentAudio.windows`). Then `SmartCleaner.summarize` → `NoteSummarizer` (one call when the
 transcript fits the model's window, else map-reduce over overlapping pieces with a merge that
 applies later corrections; extractive fallback) produces title, summary (key points + "Decided:"
 lines) and "Owner: Task — due" action items. Export: Markdown (`MarkdownExporter`) and optionally Apple Notes (`AppleNotesExporter`,
@@ -96,7 +99,7 @@ AppleScript).
 SQLite via GRDB (`Store`), WAL, at `~/Library/Application Support/Hushy/murmur.sqlite`
 (override with `MURMUR_HOME`). Tables: `dictation` (+ FTS5 `dictation_fts`), `note`
 (+ FTS5 `note_fts`), `dictionaryEntry`, `snippet`. Migrations: `v1`, `v2-edit-state`.
-Audio: `Audio/<uuid>.wav` (retention setting), `Notes/<id>/seg-NNNNNN-<mic|system>.hseg` (legacy notes: `chunk-NNNN.wav`).
+Audio: `Audio/<uuid>.wav` (retention setting), `Notes/<id>/seg-NNNNNN-<mic|system|file>.hseg` (legacy notes and imports: `chunk-NNNN.wav`).
 
 The UI never caches copies of data: `Library` holds live arrays fed by GRDB `ValueObservation`,
 and user actions go through `Library` methods that log failures.

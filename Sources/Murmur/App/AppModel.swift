@@ -266,11 +266,12 @@ final class AppModel {
         let importEncryption = encryption
         let importLibrary = library
         let importSpeech = speech
+        let importFinalizer = recorder.finalizer
         importQueue = ImportQueue { url in
             FileTranscriber(
                 fileURL: url, speech: importSpeech, store: importStore, settings: importSettings,
                 encryption: importEncryption,
-                vocabulary: .from(dictionary: importLibrary.dictionary))
+                vocabulary: .from(dictionary: importLibrary.dictionary), finalizer: importFinalizer)
         }
         pillCoordinator = PillCoordinator(pill: pill)
         settingsSync = SettingsSync(

@@ -153,6 +153,29 @@ extension Store {
         }
     }
 
+    /// Whether the note has any turn: one indexed lookup, with nothing decoded.
+    public func hasTurns(noteId: Int64) throws -> Bool {
+        try writer.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM turn WHERE noteId = ?)", arguments: [noteId]) ?? false
+        }
+    }
+
+    /// How many turns of `origin` the note has.
+    public func turnCount(noteId: Int64, origin: NoteTurn.Origin) throws -> Int {
+        try writer.read { db in
+            try NoteTurn.filter(Column("noteId") == noteId && Column("origin") == origin.rawValue).fetchCount(db)
+        }
+    }
+
+    /// The note's turns of `origin` with `id` above `afterId`, by `t0`: what the live screen adds as a recording goes,
+    /// without reading the turns it already shows.
+    public func turns(noteId: Int64, origin: NoteTurn.Origin, afterId: Int64) throws -> [NoteTurn] {
+        try writer.read { db in
+            try NoteTurn.filter(Column("noteId") == noteId && Column("origin") == origin.rawValue && Column("id") > afterId)
+                .order(Column("t0"), Column("ordinal")).fetchAll(db)
+        }
+    }
+
     /// Records a sealed segment's recognised text as its turn, marks the segment transcribed and rewrites the
     /// transcript cache, in one transaction.
     /// A segment that is not `sealed` any more (a repeat, or another runner got there first) is left alone.
@@ -164,10 +187,11 @@ extension Store {
         try writer.write { db in
             guard let segment = try CaptureSegment.fetchOne(db, key: segmentId), segment.state == .sealed else { return false }
             let stream = NoteTurn.Stream(rawValue: segment.stream.rawValue) ?? .unknown
+            // An imported file's side is an import turn; a recording's sides are capture turns.
             var turn = NoteTurn(
                 noteId: segment.noteId, ordinal: NoteTurn.captureOrdinal(seq: segment.seq, stream: segment.stream),
                 stream: stream, segmentId: segmentId, speakerId: speakerId, t0: segment.t0,
-                t1: segment.t0 + segment.duration, text: text, words: words, origin: .capture)
+                t1: segment.t0 + segment.duration, text: text, words: words, origin: segment.stream == .file ? .imported : .capture)
             try turn.insert(db)
             try db.execute(
                 sql: "UPDATE capture_segment SET state = 'transcribed', updatedAt = ? WHERE id = ?",
@@ -189,7 +213,8 @@ extension Store {
                 row.ordinal = ordinal
                 try row.insert(db)
             }
-            try Self.materializeTranscript(db, noteId: noteId)
+            let transcript = try Self.materializeTranscript(db, noteId: noteId)
+            try Self.reresolveFactEvidence(db, noteId: noteId, transcript: transcript)
         }
     }
 }

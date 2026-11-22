@@ -39,17 +39,18 @@ struct ShareRecapControl: View {
     }
 
     /// Whether anything would be shared with the current switch; checked without reading speakers.
-    private var hasRecap: Bool { MeetingRecap.make(from: note, includeTranscript: includeTranscript) != nil }
+    private var hasRecap: Bool {
+        MeetingRecap.make(from: note, includeTranscript: includeTranscript, facts: note.id.flatMap { try? model.store.facts(noteId: $0) }) != nil
+    }
 
     private func makeRecap() -> MeetingRecap? {
         let segments = note.id.flatMap { try? model.store.noteSegments(noteId: $0) } ?? []
         // Names show only where the note itself shows speakers (a Pro feature).
         let speakers = Entitlements.has(.speakerLabels) ? MeetingRecap.speakers(in: segments) : []
-        let done = note.id.flatMap { model.library.doneActionItemsByNote[$0] } ?? []
         let turns = note.id.flatMap { try? model.store.transcript(noteId: $0) }
         return MeetingRecap.make(
-            from: note, turns: turns, speakers: speakers, ownerName: model.settings.userName, doneItems: done,
-            includeTranscript: includeTranscript)
+            from: note, turns: turns, speakers: speakers, ownerName: model.settings.userName,
+            includeTranscript: includeTranscript, facts: note.id.flatMap { try? model.store.facts(noteId: $0) })
     }
 
     private func report(_ new: ShareRecapFeedback) {

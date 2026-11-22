@@ -162,16 +162,15 @@ extension NoteRecorder {
         }
     }
 
+    /// How far the recording has been written down. The turns themselves are in the store, where the live screen
+    /// reads them (`LiveTurnReader`).
     private func showLive(_ outcomes: [(CaptureSegment, SegmentTranscriber.Outcome)], noteId: Int64) {
-        for (segment, outcome) in outcomes {
+        for (segment, _) in outcomes {
             transcribedSeconds = max(transcribedSeconds, segment.t0 + segment.duration)
-            guard case .turn(_, let text) = outcome else { continue }
-            liveTurns.append(LiveTurn(
-                part: segment.seq, side: segment.stream == .system ? .call : .you, startSeconds: segment.t0, text: text))
         }
-        guard activeNote?.id == noteId, let transcript = try? store.transcript(noteId: noteId) else { return }
+        guard activeNote?.id == noteId, outcomes.contains(where: { if case .turn = $0.1 { true } else { false } }),
+              let transcript = try? store.transcript(noteId: noteId) else { return }
         activeNote = activeNote?.caching(transcript)
-        liveTranscript = transcript.rendered
         onChange?()
     }
 

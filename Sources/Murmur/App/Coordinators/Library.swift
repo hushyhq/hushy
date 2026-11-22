@@ -264,26 +264,26 @@ final class Library {
         perform("rename note") { _ = try store.save(copy) }
     }
 
-    /// Summarizes the note again from its turns, "Name: text" when several people spoke (renamed
-    /// speakers by name). Check-offs stay on their tasks (`DiarizedDigest.mergeItems`); the title
-    /// changes only if it's still the default.
+    /// Summarizes the note again from its turns and extracts its facts again, the same two passes a finished
+    /// meeting gets (`FinalizeRunner.write`). Facts the person checked off or edited stay (`replaceModelFacts`); the
+    /// title changes only if it's still the default.
     func resummarize(_ note: Note) {
         guard let id = note.id else { return }
         Task {
-            let turns = (try? store.transcript(noteId: id))?.rendered
-            let digest = await SmartCleaner.summarize(turns ?? note.transcript, fallbackTitle: note.title)
+            guard let turns = try? store.transcript(noteId: id), !turns.isEmpty else { return }
+            let digest = await FinalizeRunner.summary(turns.rendered, fallbackTitle: note.title)
+            var saved: Note?
             perform("save summary") {
-                try store.updateNoteDigest(id: id) { stored, done in
-                    guard stored.status == .ready else { return nil }
-                    var copy = stored
-                    copy.summary = digest.summary
-                    let merged = DiarizedDigest.mergeList(
-                        stored.actionItems, details: stored.actionItemDetails, done: done,
-                        labelled: digest.actionItems, labelledDetails: digest.actionDetails)
-                    copy.setActionItems(merged.items, details: merged.details)
-                    if copy.title.hasPrefix("Note · ") { copy.title = digest.title }
-                    return (copy, merged.done)
-                }
+                guard var stored = try store.note(id: id), stored.status == .ready else { return }
+                stored.summary = digest.summary
+                if stored.title.hasPrefix("Note · ") { stored.title = digest.title }
+                saved = try store.update(stored)
+            }
+            guard let saved else { return }
+            let extracted = await FinalizeRunner.facts(turns, noteId: id, title: saved.title, kind: "meeting")
+            guard extracted.ran else { return }
+            perform("save meeting facts") {
+                try store.replaceModelFactsAndCache(noteId: id, extractor: extracted.extractor, facts: extracted.facts)
             }
         }
     }
@@ -292,7 +292,8 @@ final class Library {
         var result: URL?
         let done = note.id.flatMap { doneActionItemsByNote[$0] } ?? []
         let turns = note.id.flatMap { try? store.transcript(noteId: $0) }
-        perform("export note") { result = try MarkdownExporter.export(note, transcript: turns, to: directory, done: done) }
+        let facts = note.id.flatMap { try? store.facts(noteId: $0) }
+        perform("export note") { result = try MarkdownExporter.export(note, transcript: turns, facts: facts, to: directory, done: done) }
         return result
     }
 
@@ -367,6 +368,11 @@ final class Library {
         guard let id = note.id else { return }
         let isDone = !isActionItemDone(note, itemIndex: itemIndex)
         perform("toggle action item") { try store.setActionItemDone(noteId: id, itemIndex: itemIndex, isDone: isDone) }
+    }
+
+    /// Checks an action fact off or reopens it; its legacy check-off follows (`Store.setActionFactDone`).
+    func setActionFactDone(_ note: Note, uuid: String, isDone: Bool) {
+        perform("toggle action item") { try store.setActionFactDone(uuid: uuid, isDone: isDone) }
     }
 
     /// Runs a store operation and logs failures instead of silently dropping them.

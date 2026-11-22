@@ -20,24 +20,13 @@ final class NoteRecorder {
 
     var activeNote: Note?
     private(set) var isFinishing = false
-    var liveTranscript = ""
     /// The note being recognised again after Try again.
     private(set) var retryingNoteID: Int64?
     /// When each side of the recording last heard speech, and whether a side has died, for the live screen.
     var capture: MeetingCapture?
-    /// Seconds of the recording already transcribed (the end of the last recognised segment).
+    /// Seconds of the recording already transcribed (the end of the last recognised segment). The live screen reads
+    /// the turns themselves from the store (`LiveTurnReader`).
     var transcribedSeconds: Double = 0
-    /// Both sides of the call as they are transcribed, one entry per side per segment, for the live screen.
-    var liveTurns: [LiveTurn] = []
-
-    struct LiveTurn: Identifiable, Equatable {
-        enum Side { case you, call }
-        var id: String { "\(part)-\(side)" }
-        let part: Int
-        let side: Side
-        let startSeconds: Double
-        let text: String
-    }
 
     /// A note never keeps its whole recording in memory: drained audio is on disk (notes audit B5).
     @ObservationIgnored let audio: AudioCapture = {
@@ -146,9 +135,7 @@ final class NoteRecorder {
         let mic = makeMicSource?() ?? defaultMicSource()
         let session = CaptureSession(noteId: noteId, journal: journal, mic: mic)
         self.session = session
-        liveTranscript = ""
         transcribedSeconds = 0
-        liveTurns = []
         capture = MeetingCapture(startedAt: startedAt, isCapturingCall: false,
                                  callRequested: makeCallSource != nil || (settings.recordCallAudio && Entitlements.has(.systemAudio)))
         do {
@@ -253,7 +240,6 @@ final class NoteRecorder {
         }
         session = nil
         activeNote = nil
-        liveTranscript = ""
         capture = nil
         clearCaptureNotice()
         pill.isCapturingCallAudio = false
@@ -309,7 +295,6 @@ final class NoteRecorder {
             self.activeNote = nil
             self.session = nil
             self.isFinishing = false
-            self.liveTranscript = ""
             self.capture = nil
             self.clearCaptureNotice()
             self.onChange?()
@@ -388,7 +373,14 @@ final class NoteRecorder {
 
     /// Same cleanup level as dictation; voice commands stay off because in a recording "new line" or "scratch that"
     /// is something someone said, not an instruction.
-    static func cleaner(level: CleanupLevel) -> @Sendable (String) -> String {
-        { text in TextCleaner(options: CleanupOptions(level: level, voiceCommandsEnabled: false)).clean(text).text }
+    ///
+    /// Each call drains its own autorelease pool. `TextCleaner` leaves Foundation objects autoreleased, and the
+    /// assembling step cleans every turn of a meeting in one synchronous pass on a cooperative thread, whose pool is not
+    /// drained until the pass ends: an hour's 12,000 turns held about 240 MB until then (measured 2026-11-12: 9,100
+    /// cleans, footprint +236 MB without a pool per call, +8 MB with one).
+    nonisolated static func cleaner(level: CleanupLevel) -> @Sendable (String) -> String {
+        { text in
+            autoreleasepool { TextCleaner(options: CleanupOptions(level: level, voiceCommandsEnabled: false)).clean(text).text }
+        }
     }
 }

@@ -146,7 +146,11 @@ struct MeetingPageView: View {
             commitment: commitment,
             isPlaying: commitment.moment.map { meetings.audio.isPlaying(noteId: note.id, seconds: $0.seconds) } ?? false,
             toggle: {
-                model.library.toggleActionItemDone(note, itemIndex: commitment.itemIndex)
+                if let uuid = commitment.factUUID {
+                    model.library.setActionFactDone(note, uuid: uuid, isDone: !commitment.isDone)
+                } else {
+                    model.library.toggleActionItemDone(note, itemIndex: commitment.itemIndex)
+                }
                 reload()
             },
             play: play,

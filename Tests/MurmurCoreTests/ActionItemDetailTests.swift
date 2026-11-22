@@ -197,40 +197,6 @@ struct ActionItemDetailTests {
         #expect(try store.doneActionItemIndexes(noteId: id) == [1])
     }
 
-    // MARK: Re-summary keeps fields with their lines
-
-    @Test("merging a labelled digest keeps a checked item on its task, with its fields")
-    func mergeKeepsFields() {
-        let items = ["Priya: Send the revised budget — by Friday", "Book the room"]
-        let current = Self.details.prefix(2).map { $0 }
-        let labelled = [
-            ActionItemDetail(owner: "Priya", task: "Send the budget to finance", due: "Friday"),
-            ActionItemDetail(owner: "Leo", task: "Draft the launch note", due: ""),
-        ]
-        // Item 1 (Book the room) is checked and the new digest does not have it: it is kept at the end.
-        let merged = DiarizedDigest.mergeList(
-            items, details: current, done: [1], labelled: labelled.map(\.line), labelledDetails: labelled)
-        #expect(merged.items.count == 3)
-        #expect(merged.details?.count == 3)
-        #expect(merged.items[2] == "Book the room")
-        #expect(merged.details?[2] == current[1])
-        #expect(merged.done == [2])
-        // Labelled lines without fields: the lines are merged as before and no fields are claimed.
-        let plain = DiarizedDigest.mergeList(items, details: current, done: [1], labelled: ["x"], labelledDetails: nil)
-        #expect(plain.details == nil)
-        #expect(plain.items == ["x", "Book the room"])
-        // A kept item that never had fields cannot be given an owner: the merged note keeps lines only,
-        // never a mix of known owners and guesses.
-        let fromOld = DiarizedDigest.mergeList(items, details: nil, done: [1], labelled: labelled.map(\.line), labelledDetails: labelled)
-        #expect(fromOld.details == nil)
-        #expect(fromOld.items == labelled.map(\.line) + ["Book the room"])
-        #expect(fromOld.done == [2])
-        // A checked item that matches a labelled one needs nothing appended, so the fields survive.
-        let matched = DiarizedDigest.mergeList(items, details: nil, done: [0], labelled: labelled.map(\.line), labelledDetails: labelled)
-        #expect(matched.details == labelled)
-        #expect(matched.done == [0])
-    }
-
     // MARK: Open items query
 
     @Test("open items: done excluded, owner filter, newest note first, items in order")

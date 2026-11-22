@@ -1,23 +1,24 @@
 import Foundation
 import GRDB
 
-/// The one mapping from Hushy's stored meeting (the note, its summary and items, its calendar
-/// link, attendees and speaker turns) to `MeetingRecord`. The summary types live in `Cleanup`
-/// (`NoteDigestMerge.output`): key points as "- point" lines, then "- Decided: …" lines, and the
-/// action items as fields beside their one-line form. If those change, this file changes.
+/// The one mapping from Hushy's stored meeting (the note, its facts, its calendar link, attendees and speaker
+/// turns) to `MeetingRecord`. Decisions and action items come from the visible facts (`MeetingFact.isVisible`); the
+/// summary gives only key points (`LegacySummary`).
 extension MeetingRecord {
-    static let decidedPrefix = "Decided:"
-
     public init(
-        note: Note, noteId: Int64, done: Set<Int>, link: NoteCalendarLink?, attendees: [NoteAttendee],
+        note: Note, noteId: Int64, facts: [MeetingFact], link: NoteCalendarLink?, attendees: [NoteAttendee],
         segments: [(speaker: String?, start: Double, text: String)], jots: [MeetingJot] = []
     ) {
-        let (points, summarised) = Self.summaryLines(note.summary)
-        let decisions = Self.typedFirst(jots.filter(\.isDecision).map(\.shownText), then: summarised)
-        let items = note.actionItems.indices.compactMap { index -> ActionItem? in
-            guard let detail = note.actionItemDetail(at: index) else { return nil }
-            return ActionItem(owner: detail.owner, task: detail.task, due: detail.due, isDone: done.contains(index))
-        }
+        let sections = Dictionary(uniqueKeysWithValues: MeetingFactText.sections(facts).map { ($0.kind, $0.facts) })
+        // A jot fact is the person's own "!" line, already among the typed decisions.
+        let modelDecisions = (sections[.decision] ?? []).filter { $0.origin != .jot }.map(\.text)
+        let decisions = Self.typedFirst(jots.filter(\.isDecision).map(\.shownText), then: modelDecisions)
+        // A note saved without facts (an Ask answer kept as a note) keeps its own items.
+        let items = facts.isEmpty
+            ? note.actionItems.indices.compactMap { index in note.actionItemDetail(at: index).map { ActionItem(owner: $0.owner, task: $0.task, due: $0.due) } }
+            : (sections[.action] ?? []).map { fact in
+                ActionItem(owner: fact.ownerText ?? "", task: fact.text, due: fact.due ?? "", isDone: fact.status == .done)
+            }
         let turns = segments.isEmpty
             ? Sentences.split(note.transcript.replacingOccurrences(of: "\n", with: " "))
                 .map { Turn(text: $0.trimmingCharacters(in: .whitespaces)) }.filter { !$0.text.isEmpty }
@@ -28,33 +29,15 @@ extension MeetingRecord {
             end: link?.eventEnd ?? start.addingTimeInterval(max(note.durationSeconds, 0)),
             seriesKey: link?.seriesKey,
             attendees: attendees.map { Attendee(name: $0.name, companyDomain: $0.companyDomain, isSelf: $0.isSelf) },
-            turns: turns, keyPoints: points, decisions: decisions, actionItems: items)
+            turns: turns, keyPoints: LegacySummary.keyPoints(note.summary), decisions: decisions, actionItems: items)
     }
 
-    /// The person's own "!" lines, then the summary's decisions minus any that restate one of them.
+    /// The person's own "!" lines, then the extracted decisions minus any that restate one of them.
     static func typedFirst(_ typed: [String], then summarised: [String]) -> [String] {
         let typedWords = typed.map(MeetingWords.content)
         return typed + summarised.filter { text in
             !typedWords.contains { MeetingWords.restates($0, MeetingWords.content(text)) }
         }
-    }
-
-    /// The summary's bullet lines split into key points and decisions.
-    static func summaryLines(_ summary: String) -> (points: [String], decisions: [String]) {
-        var points: [String] = []
-        var decisions: [String] = []
-        for raw in summary.split(separator: "\n") {
-            var line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("- ") || line.hasPrefix("• ") { line = String(line.dropFirst(2)) }
-            line = line.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty else { continue }
-            if line.hasPrefix(decidedPrefix) {
-                decisions.append(line.dropFirst(decidedPrefix.count).trimmingCharacters(in: .whitespaces))
-            } else {
-                points.append(line)
-            }
-        }
-        return (points, decisions)
     }
 
     /// "Speaker 2" names nobody; a renamed or remembered speaker does.
@@ -76,8 +59,7 @@ extension Store {
         let notes = try Note.filter(Column("status") == Note.Status.ready.rawValue).order(Column("createdAt").desc).limit(limit).fetchAll(db)
         return try notes.compactMap { note -> MeetingRecord? in
             guard let id = note.id else { return nil }
-            let done = try NoteActionItemStatus.filter(Column("noteId") == id && Column("isDone") == true)
-                .fetchAll(db).map(\.itemIndex)
+            let facts = try Self.visibleFacts(db, noteId: id)
             let link = try NoteCalendarLink.fetchOne(db, key: id)
             let attendees = try NoteAttendee.filter(Column("noteId") == id).order(Column("ordinal")).fetchAll(db)
             // Both sides, from the turns: one segment per line of the shown transcript when several voices
@@ -88,7 +70,7 @@ extension Store {
                 ? transcript.lines.map { (speaker: $0.label, start: $0.start ?? 0, text: $0.text) }
                 : transcript.turns.allSatisfy({ $0.origin == .legacy }) ? try Self.legacySegments(db, noteId: id) : []
             let jots = try MeetingJot.filter(Column("noteId") == id).fetchAll(db)
-            return MeetingRecord(note: note, noteId: id, done: Set(done), link: link, attendees: attendees, segments: segments, jots: jots)
+            return MeetingRecord(note: note, noteId: id, facts: facts, link: link, attendees: attendees, segments: segments, jots: jots)
         }
     }
 

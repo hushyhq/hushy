@@ -34,13 +34,13 @@ enum AppleNotesExporter {
     /// `done` are the note's checked-off action-item indexes (kept apart from the note); `transcript` is the
     /// note's turns (both sides of a call), else the stored cache of them.
     static func export(
-        _ note: Note, transcript: NoteTranscript? = nil, done: Set<Int> = [],
+        _ note: Note, transcript: NoteTranscript? = nil, facts: [MeetingFact]? = nil, done: Set<Int> = [],
         using scripter: any AppleNotesScripting = defaultScripter
     ) throws {
         let source = """
             tell application "Notes"
                 if not (exists folder "\(folder)") then make new folder with properties {name:"\(folder)"}
-                make new note at folder "\(folder)" with properties {name:\(quoted(note.title)), body:\(quoted(html(note, transcript: transcript, done: done)))}
+                make new note at folder "\(folder)" with properties {name:\(quoted(note.title)), body:\(quoted(html(note, transcript: transcript, facts: facts, done: done)))}
             end tell
             """
         if let error = scripter.run(source) {
@@ -51,8 +51,27 @@ enum AppleNotesExporter {
     /// Notes stores HTML; keep structure (headings, lists) and escape user text.
     /// Action items are the same one-line form the note, the recap and the Markdown export use
     /// ("Priya: Send the deck — by Friday"), with " (done)" after a checked-off item.
-    static func html(_ note: Note, transcript: NoteTranscript? = nil, done: Set<Int> = []) -> String {
+    /// With `facts`, decisions, action items and open questions come from the visible facts, each with its moment and
+    /// a link that opens the meeting there, and the summary keeps its key points.
+    static func html(_ note: Note, transcript: NoteTranscript? = nil, facts: [MeetingFact]? = nil, done: Set<Int> = []) -> String {
         var parts = ["<h1>\(escape(note.title))</h1>"]
+        if let facts, !facts.isEmpty {
+            let points = LegacySummary.keyPoints(note.summary)
+            if !points.isEmpty { parts.append("<h2>Summary</h2><ul>\(points.map { "<li>\(escape($0))</li>" }.joined())</ul>") }
+            for section in MeetingFactText.sections(facts) {
+                let items = section.facts.map { fact -> String in
+                    let moment = fact.t0.map {
+                        " <a href=\"\(MeetingFactText.url(noteId: note.id ?? 0, seconds: $0))\">\(MeetingFactText.clock($0))</a>"
+                    } ?? ""
+                    let state = fact.kind == .action && fact.status == .done ? " (done)" : ""
+                    let quote = fact.quote.map { "<br><i>“\(escape($0))”</i>" } ?? ""
+                    return "<li>\(escape(MeetingFactText.line(fact)))\(state)\(moment)\(quote)</li>"
+                }
+                parts.append("<h2>\(section.title)</h2><ul>\(items.joined())</ul>")
+            }
+            parts.append("<h2>Transcript</h2><p>\(escape(transcript?.rendered ?? note.transcript))</p>")
+            return parts.joined()
+        }
         if !note.summary.isEmpty {
             let items = note.summary.components(separatedBy: "\n").filter { !$0.isEmpty }
                 .map { "<li>\(escape($0.hasPrefix("- ") ? String($0.dropFirst(2)) : $0))</li>" }

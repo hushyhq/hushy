@@ -24,6 +24,9 @@ public struct MeetingRecap: Equatable, Sendable {
     public let actionDetails: [ActionItemDetail]?
     /// The full transcript, only when the caller asked for it.
     public let transcript: String?
+    /// Decisions and open questions from the note's facts, each with its moment ("Ship Friday (04:05)").
+    public var decisions: [String] = []
+    public var openQuestions: [String] = []
 
     static let fallbackTitle = "Meeting recap"
 
@@ -38,9 +41,13 @@ public struct MeetingRecap: Equatable, Sendable {
     ///   stored cache of the same turns is used.
     public static func make(
         from note: Note, turns: NoteTranscript? = nil, speakers: [NoteSpeaker] = [], ownerName: String? = nil, doneItems: Set<Int> = [],
-        includeTranscript: Bool = false, locale: Locale = .current, timeZone: TimeZone = .current
+        includeTranscript: Bool = false, facts: [MeetingFact]? = nil, locale: Locale = .current, timeZone: TimeZone = .current
     ) -> MeetingRecap? {
         guard note.status == .ready else { return nil }
+        if let facts, !facts.isEmpty {
+            return make(from: note, facts: facts, turns: turns, speakers: speakers, ownerName: ownerName,
+                        includeTranscript: includeTranscript, locale: locale, timeZone: timeZone)
+        }
         let points = summaryLines(note.summary)
         // Positions of the items with text, so check-offs and fields stay on the right item.
         let kept = note.actionItems.indices.filter { !trimmed(note.actionItems[$0]).isEmpty }
@@ -58,6 +65,32 @@ public struct MeetingRecap: Equatable, Sendable {
             summaryPoints: points, actionItems: items, actionDone: kept.map { doneItems.contains($0) },
             actionDetails: note.actionItemDetails.map { details in kept.map { details[$0] } },
             transcript: transcript)
+    }
+
+    /// The recap from the note's visible facts: key points from the summary, then decisions, action items (with
+    /// their check-offs) and open questions, each with the moment it was said.
+    static func make(
+        from note: Note, facts: [MeetingFact], turns: NoteTranscript?, speakers: [NoteSpeaker], ownerName: String?,
+        includeTranscript: Bool, locale: Locale, timeZone: TimeZone
+    ) -> MeetingRecap? {
+        let points = LegacySummary.keyPoints(note.summary)
+        let sections = Dictionary(uniqueKeysWithValues: MeetingFactText.sections(facts).map { ($0.kind, $0.facts) })
+        let actions = sections[.action] ?? []
+        let body = trimmed(turns?.rendered ?? note.transcript)
+        let transcript = includeTranscript && !body.isEmpty ? body : nil
+        let decisions = (sections[.decision] ?? []).map(MeetingFactText.plain)
+        let questions = (sections[.openQuestion] ?? []).map(MeetingFactText.plain)
+        guard !points.isEmpty || !actions.isEmpty || !decisions.isEmpty || !questions.isEmpty || transcript != nil else { return nil }
+        let title = trimmed(note.title)
+        return MeetingRecap(
+            title: title.isEmpty ? fallbackTitle : title,
+            dateText: note.createdAt.formatted(
+                Date.FormatStyle(date: .long, time: .shortened, locale: locale, timeZone: timeZone)),
+            lengthText: note.durationSeconds >= 1 ? DurationLabelFormatter.label(seconds: note.durationSeconds) : "",
+            attendees: RecapAttendees.names(from: speakers, ownerName: ownerName),
+            summaryPoints: points, actionItems: actions.map(MeetingFactText.plain), actionDone: actions.map { $0.status == .done },
+            actionDetails: actions.map(MeetingFactText.detail),
+            transcript: transcript, decisions: decisions, openQuestions: questions)
     }
 
     /// The distinct speakers in a note's stored segments, in first-appearance order.

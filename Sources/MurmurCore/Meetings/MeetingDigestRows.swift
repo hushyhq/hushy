@@ -18,14 +18,20 @@ public struct MeetingDigestRows: Sendable, Equatable {
     }
 
     public struct ActionItem: Sendable, Equatable, Hashable {
-        /// Index into `Note.actionItems`, which is what check-offs are keyed by.
+        /// Index into `Note.actionItems` (the legacy cache of the visible actions, same order).
         public var index: Int
         public var detail: ActionItemDetail
         public var atSeconds: Double?
-        public init(index: Int, detail: ActionItemDetail, atSeconds: Double? = nil) {
+        /// The fact this row shows: check-offs go to it (`Store.setActionFactDone`). Nil for rows not from facts.
+        public var factUUID: String?
+        /// The fact's own status; nil means "ask the index-keyed check-offs".
+        public var isDone: Bool?
+        public init(index: Int, detail: ActionItemDetail, atSeconds: Double? = nil, factUUID: String? = nil, isDone: Bool? = nil) {
             self.index = index
             self.detail = detail
             self.atSeconds = atSeconds
+            self.factUUID = factUUID
+            self.isDone = isDone
         }
     }
 
@@ -49,7 +55,27 @@ public protocol MeetingDigestSource: Sendable {
     func rows(for note: Note) -> MeetingDigestRows
 }
 
-/// Today's source: the rows recovered from the note's stored summary and action-item fields.
+/// The rows from the note's visible facts: each decision and action at the moment its quote was said, with the
+/// fact's own check-off; key points from the summary.
+public struct FactDigest: Sendable {
+    public let facts: [MeetingFact]
+    public init(facts: [MeetingFact]) { self.facts = facts }
+
+    public func rows(for note: Note) -> MeetingDigestRows {
+        var rows = MeetingDigestRows(keyPoints: LegacySummary.keyPoints(note.summary).filter { !$0.hasSuffix("?") })
+        let sections = Dictionary(uniqueKeysWithValues: MeetingFactText.sections(facts).map { ($0.kind, $0.facts) })
+        // A jot fact is the person's own "!" line; the page shows jots itself.
+        rows.decisions = (sections[.decision] ?? []).filter { $0.origin != .jot }.map { .init(text: $0.text, atSeconds: $0.t0) }
+        rows.actionItems = (sections[.action] ?? []).enumerated().map { index, fact in
+            .init(index: index, detail: MeetingFactText.detail(fact),
+                  atSeconds: fact.t0, factUUID: fact.uuid, isDone: fact.status == .done)
+        }
+        rows.openQuestions = (sections[.openQuestion] ?? []).map(\.text)
+        return rows
+    }
+}
+
+/// The rows recovered from a note's stored summary and action-item fields, for a caller with no facts.
 public struct StoredSummaryDigest: MeetingDigestSource {
     public init() {}
 

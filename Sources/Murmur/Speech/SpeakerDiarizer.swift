@@ -5,8 +5,9 @@ import MurmurCore
 import os
 
 /// Runs post-hoc speaker diarization over a finished note's audio and persists the result, per
-/// docs/research/speaker-labeling.md §2.1: one offline pass over the *whole* note's concatenated
-/// audio (not per-chunk). The engine is `SpeakerDiarizerConstants.engine` (Nemotron 3, measured in
+/// docs/research/speaker-labeling.md §2.1: one pass over the *whole* note's audio in time order (not per-chunk),
+/// streamed window by window (`StreamedDiarization`) so neither the hour of samples nor its features are held at
+/// once, and paused between windows while a dictation is in progress. The engine is `SpeakerDiarizerConstants.engine` (Nemotron 3, measured in
 /// docs/research/diarizer-bakeoff-2026-11-06.md); FluidAudio's legacy `DiarizerManager` is the
 /// fallback and still provides the voice embeddings saved voices are compared in.
 ///
@@ -31,7 +32,7 @@ actor SpeakerDiarizer {
     }
 
     private var manager: DiarizerManager?
-    private var nemotron: Nemotron3Diarizer?
+    private var nemotron: LoadedNemotron?
     private var nemotronLoad = ModelLoadBackoff()
     private var legacyLoad = ModelLoadBackoff()
     private let downloadLegacyModels: @Sendable () async throws -> DiarizerModels
@@ -59,26 +60,25 @@ actor SpeakerDiarizer {
     func assembleAndSave(
         note: Note, micWords: [MurmurCore.WordTiming], systemWords: [MurmurCore.WordTiming], isTwoChannel: Bool,
         ownerName: String?, diarize shouldDiarize: Bool, clean: @Sendable (String) -> String, store: Store,
-        loadAudio: @Sendable (CaptureStream) throws -> [Float], voiceSignatureStore: VoiceSignatureStore? = nil
+        audio: SideAudio, yield: @escaping @Sendable () async -> Void = {}, voiceSignatureStore: VoiceSignatureStore? = nil
     ) async -> Bool {
         guard let id = note.id, !micWords.isEmpty || !systemWords.isEmpty else { return false }
         let start = Date()
         var diarized: DiarizedAudio?
-        var roomSamples: [Float] = []
+        // One side on the note clock (`CaptureSegmentAudio.windows`), so diarized times match word times.
+        let side: CaptureStream = isTwoChannel ? .system : .mic
         if shouldDiarize {
             do {
                 let words = isTwoChannel ? systemWords : micWords
-                // One side on the note clock (`CaptureSegmentAudio.timeline`), so diarized times match word times.
-                let samples = try loadAudio(isTwoChannel ? .system : .mic)
-                if !words.isEmpty, !samples.isEmpty {
-                    diarized = try await diarize(samples, noteId: id)
-                    roomSamples = samples
+                if !words.isEmpty, audio.hasAudio(side) {
+                    diarized = try await diarize(audio, side: side, noteId: id, yield: yield)
                 }
             } catch {
                 log.error("diarization for note \(id) failed, keeping the turns by side: \(error.localizedDescription)")
             }
         }
         guard isTwoChannel || diarized != nil else { return false }
+        await yield()
         let assembly = TurnAssembler.assemble(
             mic: micWords, system: systemWords, isTwoChannel: isTwoChannel,
             micTurns: isTwoChannel ? [] : diarized?.turns ?? [], systemTurns: isTwoChannel ? diarized?.turns ?? [] : [],
@@ -95,9 +95,10 @@ actor SpeakerDiarizer {
             """)
         if !isTwoChannel, let diarized, let voiceSignatureStore, Entitlements.has(.voiceSignatures),
            let speakers = try? store.noteSpeakers(noteId: id) {
+            await yield()
             await suggestVoiceMatches(
                 noteId: id, insertedSpeakers: speakers, labels: assembly.speakers.map(\.diarizerLabel), diarized: diarized,
-                samples: roomSamples, store: store, voiceSignatureStore: voiceSignatureStore)
+                range: { try audio.range(side, $0, $1) }, store: store, voiceSignatureStore: voiceSignatureStore)
         }
         return true
     }
@@ -109,8 +110,8 @@ actor SpeakerDiarizer {
     /// .has(.voiceSignatures)`), and a pure best-effort step: any failure here is logged and never
     /// affects the note or the segments already saved above.
     private func suggestVoiceMatches(
-        noteId: Int64, insertedSpeakers: [NoteSpeaker], labels: [String], diarized: DiarizedAudio, samples: [Float],
-        store: Store, voiceSignatureStore: VoiceSignatureStore
+        noteId: Int64, insertedSpeakers: [NoteSpeaker], labels: [String], diarized: DiarizedAudio,
+        range: (Double, Double) throws -> [Float], store: Store, voiceSignatureStore: VoiceSignatureStore
     ) async {
         do {
             let voices = try store.voices()
@@ -121,7 +122,7 @@ actor SpeakerDiarizer {
                 return (id, voice.name, embedding)
             }
 
-            let averaged = try await speakerEmbeddings(diarized, samples: samples)
+            let averaged = try await speakerEmbeddings(diarized, range: range)
             // `insertedSpeakers[i]` is "Speaker i+1", built from `labels[i]` in `diarizeAndSave`.
             for (speaker, label) in zip(insertedSpeakers, labels) {
                 guard let speakerId = speaker.id, speaker.voiceId == nil, let embedding = averaged[label] else { continue }
@@ -192,17 +193,19 @@ actor SpeakerDiarizer {
         }
     }
 
-    /// Finds who spoke when in `samples` with `SpeakerDiarizerConstants.engine`, falling back to
-    /// the legacy diarizer when the chosen engine fails or finds no one speaking.
-    private func diarize(_ samples: [Float], noteId: Int64) async throws -> DiarizedAudio {
+    /// Finds who spoke when on one side with `SpeakerDiarizerConstants.engine`, window by window and yielding to any
+    /// dictation between windows; falls back to the legacy diarizer (which needs the whole side at once) when the
+    /// chosen engine fails or finds no one speaking.
+    private func diarize(_ audio: SideAudio, side: CaptureStream, noteId: Int64, yield: @escaping @Sendable () async -> Void) async throws -> DiarizedAudio {
         var nemotronTurns: [DiarizationTurn]?
         if SpeakerDiarizerConstants.engine == .nemotron3 {
             // The legacy models stay on disk for "remember this voice" and give the voice embeddings.
             _ = try await meetingManager()
-            nemotronTurns = await self.nemotronTurns(samples, noteId: noteId)
+            nemotronTurns = await self.nemotronTurns(audio.windows(side), noteId: noteId, yield: yield)
         }
         if let turns = Self.usable(nemotronTurns, noteId: noteId) { return DiarizedAudio(turns: turns, perTurnEmbeddings: nil) }
-        return try await legacyDiarize(samples)
+        await yield()
+        return try await legacyDiarize(try audio.whole(side))
     }
 
     /// Nemotron's turns when it found at least one; nil sends the note to the legacy diarizer. An
@@ -217,13 +220,20 @@ actor SpeakerDiarizer {
         return turns
     }
 
-    /// nil when Nemotron could not load or run.
-    private func nemotronTurns(_ samples: [Float], noteId: Int64) async -> [DiarizationTurn]? {
-        guard let diarizer = await loadedNemotron() else { return nil }
+    /// nil when Nemotron could not load or run. One session per note over the shared models, so a second note that
+    /// starts while this one waits for a dictation cannot touch its speaker state.
+    private func nemotronTurns(
+        _ windows: AsyncThrowingStream<[Float], any Error>, noteId: Int64, yield: @escaping @Sendable () async -> Void
+    ) async -> [DiarizationTurn]? {
+        guard let models = await loadedNemotronModels() else { return nil }
+        let config = SpeakerDiarizerConstants.nemotronConfig
+        let session = NemotronStreamingSession(diarizer: Nemotron3Diarizer(config: config, models: models))
         do {
-            let (probabilities, frames) = try diarizer.processComplete(samples)
+            let result = try await StreamedDiarization.run(windows, session: session, yield: yield)
             let segments = Nemotron3Diarizer.segments(
-                probabilities: probabilities, frameCount: frames, threshold: SpeakerDiarizerConstants.nemotronSpeechThreshold)
+                probabilities: result.probabilities, frameCount: result.frames, numSpeakers: config.numSpeakers,
+                threshold: SpeakerDiarizerConstants.nemotronSpeechThreshold)
+            log.notice("Nemotron 3 streamed note \(noteId): \(result.windows) window(s), \(result.frames) frame(s)")
             return segments.map { DiarizationTurn(speakerLabel: "S\($0.speakerIndex + 1)", start: Double($0.startSeconds), end: Double($0.endSeconds)) }
         } catch {
             log.error("Nemotron 3 diarization for note \(noteId) failed, using the legacy diarizer: \(error.localizedDescription)")
@@ -248,38 +258,37 @@ actor SpeakerDiarizer {
 
     /// One embedding per speaker label in the legacy WeSpeaker space saved voices are stored in.
     /// The legacy diarizer gives one per turn; for another engine each speaker's clean turns are
-    /// picked the way "remember this voice" picks them and embedded with the legacy model.
-    private func speakerEmbeddings(_ diarized: DiarizedAudio, samples: [Float]) async throws -> [String: [Float]] {
+    /// picked the way "remember this voice" picks them, read from disk range by range (`range`, seconds on the note
+    /// clock), and embedded with the legacy model.
+    private func speakerEmbeddings(_ diarized: DiarizedAudio, range: (Double, Double) throws -> [Float]) async throws -> [String: [Float]] {
         if let perTurn = diarized.perTurnEmbeddings { return DiarizedSpeakerEmbeddings.averageEmbeddings(by: perTurn) }
         let manager = try await meetingManager()
-        let rate = SpeakerDiarizerConstants.sampleRate
         var labeled: [LabeledEmbedding] = []
         for label in orderedDistinctLabels(diarized.turns.map(\.speakerLabel)) {
             let own = diarized.turns.filter { $0.speakerLabel == label }.map { SpeechRange(start: $0.start, end: $0.end) }
             let others = diarized.turns.filter { $0.speakerLabel != label }.map { SpeechRange(start: $0.start, end: $0.end) }
             guard case .ready(let ranges, _) = SpeakerVoiceSampling.select(own: own, others: others) else { continue }
-            for range in ranges {
-                let lo = max(0, Int(range.start * rate))
-                let hi = min(samples.count, Int(range.end * rate))
-                guard lo < hi else { continue }
-                let embedding = try manager.extractSpeakerEmbedding(from: Array(samples[lo..<hi]))
-                labeled.append(LabeledEmbedding(speakerLabel: label, embedding: embedding, durationSeconds: range.duration))
+            for speech in ranges {
+                let samples = try range(speech.start, speech.end)
+                guard !samples.isEmpty else { continue }
+                let embedding = try manager.extractSpeakerEmbedding(from: samples)
+                labeled.append(LabeledEmbedding(speakerLabel: label, embedding: embedding, durationSeconds: speech.duration))
             }
         }
         return DiarizedSpeakerEmbeddings.averageEmbeddings(by: labeled)
     }
 
-    /// Loads (downloading the 190 MB preset on first use) Nemotron 3, reused for every later note.
+    /// Loads (downloading the 190 MB preset on first use) Nemotron 3's models, reused for every later note.
     /// nil while a failed load is backing off (`ModelLoadBackoff`), so an offline Mac does not try
-    /// the download again for every note. Not thread-safe, which this actor guarantees.
-    private func loadedNemotron() async -> Nemotron3Diarizer? {
-        if let nemotron { return nemotron }
+    /// the download again for every note.
+    private func loadedNemotronModels() async -> Nemotron3Models? {
+        if let nemotron { return nemotron.models }
         guard nemotronLoad.mayTry(at: now()) else { return nil }
         do {
-            let diarizer = try await Self.loadNemotron(SpeakerDiarizerConstants.nemotronConfig).diarizer
-            nemotron = diarizer
+            let loaded = try await Self.loadNemotron(SpeakerDiarizerConstants.nemotronConfig)
+            nemotron = loaded
             nemotronLoad.succeeded()
-            return diarizer
+            return loaded.models
         } catch {
             nemotronLoad.failed(at: now())
             log.error("Nemotron 3 did not load (\(error.localizedDescription)); the legacy diarizer runs until \(self.nemotronLoad.retryAt?.formatted() ?? "-", privacy: .public)")
@@ -287,15 +296,15 @@ actor SpeakerDiarizer {
         }
     }
 
-    /// Loads off the actor and hands the diarizer over in a box: FluidAudio's types are not
-    /// `Sendable`, and after this the actor is the only one that touches it.
+    /// Loads off the actor and hands the models over in a box: FluidAudio's types are not
+    /// `Sendable`, and after this the actor is the only one that touches them.
     private static func loadNemotron(_ config: Nemotron3Config) async throws -> LoadedNemotron {
-        LoadedNemotron(diarizer: Nemotron3Diarizer(config: config, models: try await Nemotron3Models.loadFromHuggingFace(config: config)))
+        LoadedNemotron(models: try await Nemotron3Models.loadFromHuggingFace(config: config))
     }
 
     private final class LoadedNemotron: @unchecked Sendable {
-        let diarizer: Nemotron3Diarizer
-        init(diarizer: Nemotron3Diarizer) { self.diarizer = diarizer }
+        let models: Nemotron3Models
+        init(models: Nemotron3Models) { self.models = models }
     }
 
     /// Finds every `chunk-NNNN<suffix>.wav`(`.enc`) file under `audioPath`, in chunk order.

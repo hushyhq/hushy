@@ -30,6 +30,8 @@ public struct MeetingPage: Sendable, Equatable {
         public let isMine: Bool
         public let isDone: Bool
         public let moment: MeetingMoment?
+        /// The fact behind the row, which a check-off changes; nil for a row not from facts.
+        public var factUUID: String? = nil
 
         /// "Priya · by Friday", "You · by Friday", or only what is known.
         public var whoAndWhen: String {
@@ -73,8 +75,8 @@ public struct MeetingPage: Sendable, Equatable {
         let commitments = rows.actionItems.map { item in
             Commitment(
                 itemIndex: item.index, task: item.detail.task, owner: item.detail.owner, due: item.detail.due,
-                isMine: item.detail.isOwned(by: myNames), isDone: doneIndexes.contains(item.index),
-                moment: locate("\(item.detail.owner) \(item.detail.task)", item.atSeconds))
+                isMine: item.detail.isOwned(by: myNames), isDone: item.isDone ?? doneIndexes.contains(item.index),
+                moment: locate("\(item.detail.owner) \(item.detail.task)", item.atSeconds), factUUID: item.factUUID)
         }
         // A typed line that asks something is an open question in the person's own words.
         let askedByYou = jots.filter(\.isQuestion).map { jot in

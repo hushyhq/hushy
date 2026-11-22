@@ -8,6 +8,7 @@ import MurmurCore
 ///   (with --backend local the summaries take the app's route: the loaded 4B, or Apple FM for another entry)
 ///   murmur-eval meeting [--golden Evals/meeting-eval/golden.json] [--digest legacy|auto|map-reduce|single-pass]
 ///       [--chunk-words N] [--plain | --app-path [--rename]] [--only m01,m09] [--out outputs.json] [--label text] [--trace]
+///       [--extractor [--answers DIR]]   (the facts path; `--answers` keeps the 4B's answers to replay, see `AnswerCache`)
 ///       [--probe-dictation [--probe-no-yield] [--probe-seconds N] [--probe-speak-seconds N]]   (see `MeetingDictationProbe`)
 ///
 /// `--digest legacy` is the summarizer before map-reduce (`LegacyNoteSummarizer`); the others are
@@ -29,6 +30,37 @@ enum MeetingRunner {
         let actionItems: [String]
         let actionDetails: [ActionItemDetail]?
         let score: MeetingScore
+        /// `--extractor`: what the facts path kept and dropped (counts only).
+        var facts: FactCounts? = nil
+        /// `--extractor`: every stored fact, hidden ones too, so a grounding rule can be tried on the output offline.
+        var records: [FactRecord]? = nil
+    }
+
+    struct FactRecord: Codable {
+        var kind: String
+        var text: String
+        var quote: String?
+        var grounding: String
+        var ownerText: String?
+        var ownerClaim: String?
+        var due: String?
+    }
+
+    /// The facts path's own counts for one meeting (`MeetingFactExtractor`).
+    struct FactCounts: Codable {
+        var chunks: Int
+        var failedChunks: Int
+        var records: Int
+        var verified: Int
+        var unsupported: Int
+        /// Visible actions with an owner, and those whose owner is neither a speaker label nor a word said in the
+        /// meeting (`MeetingScoring.isHallucinated`): the invented-owner count.
+        var ownedActions: Int
+        var inventedOwners: Int
+        /// Owners the model gave that grounding left blank (stored as claims, never shown).
+        var ownersDropped: Int
+        var visibleWithQuoteAndMoment: Int
+        var visible: Int
     }
 
     static func run(_ args: Arguments) async throws {
@@ -76,7 +108,9 @@ enum MeetingRunner {
         let summaryConfiguration = configuration, inputKind = input(args), renameSpeakers = args.flag("rename")
         for meeting in meetings {
             let row: Row
-            if args.flag("probe-dictation") {
+            if args.flag("extractor") {
+                row = await extract(meeting, input: inputKind, model: model)
+            } else if args.flag("probe-dictation") {
                 let (measured, waits) = await MeetingDictationProbe.during(
                     shared: LanguageModels.current, activity: activity, interval: probeEvery, markBusy: !args.flag("probe-no-yield"),
                     speak: .milliseconds(Int((args.string("probe-speak-seconds").flatMap(Double.init) ?? 3) * 1_000))
@@ -103,7 +137,8 @@ enum MeetingRunner {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(rows).write(to: URL(fileURLWithPath: out))
         }
-        var label = args.string("label") ?? "\(model.identifier) · \(digest) · \(input(args).rawValue)\(args.flag("rename") ? " · renamed" : "")"
+        var label = args.string("label") ?? "\(model.identifier) · \(args.flag("extractor") ? "facts" : digest) · \(input(args).rawValue)\(args.flag("rename") ? " · renamed" : "")"
+        if args.flag("extractor") { Runners.emit(factsSummary(rows)) }
         if heldout != nil { label += " · SEALED HELD-OUT (aggregates only)" }
         Runners.emit(MeetingReport.markdown(rows, label: label, memory: MeetingReport.memory(), perMeeting: heldout == nil))
     }
@@ -114,7 +149,8 @@ enum MeetingRunner {
     static func appRoute(_ args: Arguments, _ current: any LanguageModel, activity: ForegroundActivity) throws -> any LanguageModel {
         guard args.string("backend") == "local" else { return current }
         let entry = try args.localModelEntry()
-        let route = MeetingLanguageModel(shared: current, apple: AppleFoundationModel(), activity: activity)
+        let shared = try args.string("answers").map { try AnswerCache(base: current, folder: URL(fileURLWithPath: $0, isDirectory: true)) } ?? current
+        let route = MeetingLanguageModel(shared: shared, apple: AppleFoundationModel(), activity: activity)
         route.route(for: .local(entry.id))
         return route
     }
@@ -173,6 +209,83 @@ enum MeetingRunner {
             id: meeting.id, minutes: meeting.minutes, words: meeting.words, milliseconds: milliseconds, calls: calls, note: note,
             title: output.title, summary: output.summary, actionItems: output.actionItems,
             actionDetails: output.actionDetails, score: score)
+    }
+
+    /// `--extractor`: the app's facts path (`MeetingFactExtractor` and its grounder, on the model given) over the
+    /// meeting's turns. The row has the `--out` shape `score_public.py` reads: decisions as "- Decided:" summary lines,
+    /// actions as "Owner: task — due" items with their fields. Only visible facts (verified quotes) are written.
+    static func extract(_ meeting: MeetingGolden.Meeting, input: Input, model: any LanguageModel) async -> Row {
+        let text = switch input {
+        case .labelled: meeting.transcript
+        case .plain: meeting.plainTranscript
+        case .appPath: meeting.appPathTranscript
+        }
+        let transcript = Self.transcript(text)
+        let start = ContinuousClock.now
+        let (facts, report) = await MeetingFactExtractor(model: model).extract(transcript, noteId: 1, title: meeting.title, kind: "meeting")
+        let elapsed = ContinuousClock.now - start
+        let visible = facts.filter(\.isVisible)
+        let decisions = visible.filter { $0.kind == .decision }.map { "- Decided: \($0.text)" }
+        let actions = visible.filter { $0.kind == .action }
+        let details = actions.map(MeetingFactText.detail)
+        let owned = actions.compactMap(\.ownerText)
+        let invented = owned.filter { MeetingScoring.isHallucinated(owner: $0, transcript: text) }.count
+        let score = MeetingScoring.score(meeting: meeting, summary: decisions.joined(separator: "\n"), actionItems: details.map(\.line), transcript: text)
+        let counts = FactCounts(
+            chunks: report.chunks, failedChunks: report.failedChunks, records: report.records, verified: report.verified,
+            unsupported: report.unsupported, ownedActions: owned.count, inventedOwners: invented, ownersDropped: report.ownersDropped,
+            visibleWithQuoteAndMoment: visible.filter { $0.quote != nil && $0.t0 != nil }.count, visible: visible.count)
+        let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15
+        return Row(
+            id: meeting.id, minutes: meeting.minutes, words: meeting.words, milliseconds: milliseconds, calls: report.calls,
+            note: "facts: \(report.chunks) chunks, \(report.verified) verified, \(report.unsupported) unsupported, \(report.failedChunks) failed",
+            title: meeting.title, summary: decisions.joined(separator: "\n"), actionItems: details.map(\.line), actionDetails: details,
+            score: score, facts: counts,
+            records: facts.map {
+                FactRecord(kind: $0.kind.rawValue, text: $0.text, quote: $0.quote, grounding: $0.grounding.rawValue,
+                           ownerText: $0.ownerText, ownerClaim: $0.ownerClaim, due: $0.due)
+            })
+    }
+
+    /// "Label: text" lines as stored turns: one speaker per label (ids by first appearance), times one second per line.
+    static func transcript(_ text: String) -> NoteTranscript {
+        var ids: [String: Int64] = [:]
+        var names: [Int64: String] = [:]
+        var turns: [NoteTurn] = []
+        for (index, raw) in text.split(separator: "\n").enumerated() {
+            let line = String(raw)
+            var label: String?
+            var body = line
+            if let colon = line.firstIndex(of: ":"), line.distance(from: line.startIndex, to: colon) <= 40 {
+                label = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+                body = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            }
+            var speakerId: Int64?
+            if let label {
+                let id = ids[label] ?? Int64(ids.count + 1)
+                ids[label] = id
+                names[id] = label
+                speakerId = id
+            }
+            turns.append(NoteTurn(
+                id: Int64(index + 1), noteId: 1, ordinal: index, stream: .unknown, speakerId: speakerId,
+                t0: Double(index), t1: Double(index) + 1, text: body, origin: .capture))
+        }
+        return NoteTranscript(turns: turns, names: names)
+    }
+
+    /// Totals for `--extractor`: unsupported and invented-owner rates, and how many shown items carry a quote and a moment.
+    static func factsSummary(_ rows: [Row]) -> String {
+        let counts = rows.compactMap(\.facts)
+        let sum = { (key: KeyPath<FactCounts, Int>) in counts.map { $0[keyPath: key] }.reduce(0, +) }
+        let records = sum(\.records), unsupported = sum(\.unsupported), owned = sum(\.ownedActions), invented = sum(\.inventedOwners)
+        return """
+            ### Meeting facts (extractor) · \(rows.count) meetings
+
+            | records | verified (shown) | unsupported (hidden) | owned actions | invented owners | owners left blank | shown with quote + moment | failed chunks |
+            |---|---|---|---|---|---|---|---|
+            | \(records) | \(sum(\.verified)) | \(unsupported) (\(MeetingReport.pct(unsupported, records))) | \(owned) | \(invented) (\(MeetingReport.pct(invented, owned))) | \(sum(\.ownersDropped)) | \(sum(\.visibleWithQuoteAndMoment))/\(sum(\.visible)) | \(sum(\.failedChunks))/\(sum(\.chunks)) |
+            """
     }
 
     /// `--rename`: the user names every speaker after reading the digest — the app's rename

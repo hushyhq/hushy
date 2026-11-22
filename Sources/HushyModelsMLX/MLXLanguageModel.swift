@@ -7,8 +7,8 @@ import Synchronization
 ///
 /// What it adds over the Apple adapter:
 /// - **Prefix KV cache.** The system text (the caller's instructions plus the schema block) is
-///   prefilled once per (model, text) and kept in a small LRU; each call copies that cache and
-///   feeds only its own prompt tokens. `prewarm`/`prefixCache(instructions:)` build it ahead of
+///   prefilled once per (model, text) and kept in a small cache whose cleanup slots no other prompt
+///   evicts (`PrefixSlot`); each call copies that cache and feeds only its own prompt tokens. `prewarm`/`prefixCache(instructions:)` build it ahead of
 ///   time. Loading another model means another instance, so caches never cross models.
 /// - **Schema-constrained JSON** with XGrammar (`MLXGuidedGeneration`): each schema becomes a
 ///   compact EBNF grammar (fixed key order, no whitespace), so the answer always decodes and
@@ -33,7 +33,10 @@ public final class MLXLanguageModel: LanguageModel {
         /// A local directory with `config.json`, `*.safetensors` and tokenizer files (an
         /// mlx-community 4-bit conversion). Never downloaded here — M4/M5 own the download UX.
         public var directory: URL
-        public var prefixCacheCapacity = 4
+        /// Prefix-cache slots for cleanup's own prompts, which nothing else evicts, and for the other prompts a
+        /// person waits on (`MLXEngine.Settings`).
+        public var pinnedPrefixCapacity = 4
+        public var transientPrefixCapacity = 2
         /// Optional KV-cache quantization of cached prefixes (4 or 8 bits).
         public var kvCacheBits: Int?
         /// Off only for measurements ("what does the prefix cache buy?").
@@ -63,6 +66,9 @@ public final class MLXLanguageModel: LanguageModel {
         /// At key-down, page the weights back in from several threads before the GPU pass when macOS has
         /// compressed or swapped them out (`PageResidency`). Off only for the residency probe's baseline.
         public var restoresPagesOnKeyDown = true
+        /// Prompt chunk, in tokens, for background calls (meeting summaries and extracts): a dictation that cancels one
+        /// waits for at most one forward pass of this size (`MLXEngine.promptPlan`).
+        public var backgroundPromptChunk = 128
 
         public init(directory: URL) {
             self.directory = directory
@@ -77,7 +83,7 @@ public final class MLXLanguageModel: LanguageModel {
             if let adapter = environment["HUSHY_MLX_ADAPTER_DIR"], !adapter.isEmpty {
                 configuration.adapterDirectory = URL(fileURLWithPath: adapter, isDirectory: true)
             }
-            if let scope = environment["HUSHY_MLX_ADAPTER_SCOPE"], ["all", "tools"].contains(scope) { configuration.adapterScope = scope }
+            if let scope = environment["HUSHY_MLX_ADAPTER_SCOPE"], ["all", "tools", MLXEngine.meetingRecordsScope].contains(scope) { configuration.adapterScope = scope }
             if let bits = environment["HUSHY_MLX_KV_BITS"].flatMap(Int.init), [4, 8].contains(bits) {
                 configuration.kvCacheBits = bits
             }
@@ -137,6 +143,9 @@ public final class MLXLanguageModel: LanguageModel {
         public var earlySampledTokens: Int
         /// Speculation counters when the call speculated.
         public var speculation: SpeculationStats?
+        /// Each prompt chunk fed before decoding, in milliseconds, and the chunk size in tokens.
+        public var leadChunkMilliseconds: [Double] = []
+        public var leadChunkTokens = 0
     }
 
     private struct State {
@@ -167,15 +176,18 @@ public final class MLXLanguageModel: LanguageModel {
         self.state = Mutex(State(health: MLXHealth(maxConsecutiveFailures: configuration.maxConsecutiveFailures)))
         self.contextLength = Self.contextLength(in: configuration.directory) ?? LanguageModelContext.defaultTokens
         self.engine = MLXEngine(settings: .init(
-            directory: configuration.directory, prefixCacheCapacity: configuration.prefixCacheCapacity,
-            kvCacheBits: configuration.kvCacheBits,
+            directory: configuration.directory, pinnedPrefixCapacity: configuration.pinnedPrefixCapacity,
+            transientPrefixCapacity: configuration.transientPrefixCapacity,
+            kvCacheBits: configuration.kvCacheBits, backgroundPromptChunk: configuration.backgroundPromptChunk,
             toolGrammar: ToolEnvelopeGrammar.Mode(rawValue: configuration.toolGrammar) ?? .strict,
             adapterDirectory: configuration.adapterDirectory, adapterScope: configuration.adapterScope,
             sealedModelID: configuration.sealedModelID, sealedKeys: configuration.sealedKeys))
     }
 
     public var identifier: String {
-        let adapter = configuration.adapterDirectory.map { "+lora:\($0.lastPathComponent)" } ?? ""
+        let adapter = configuration.adapterDirectory.map {
+            configuration.adapterScope == MLXEngine.meetingRecordsScope ? "+lora:\(MeetingExtractAdapter.name)" : "+lora:\($0.lastPathComponent)"
+        } ?? ""
         return "mlx:\(configuration.directory.lastPathComponent)\(adapter)"
     }
 
@@ -235,7 +247,8 @@ public final class MLXLanguageModel: LanguageModel {
         guard isAvailable else { return }
         if configuration.restoresPagesOnKeyDown { await restorePages(why: "key-down", threads: WarmPolicy.keyDownThreads) }
         do {
-            try await engine.touchCachedPrefix(system: systemText(instructions: instructions, schema: schema(for: instructions)))
+            let schema = schema(for: instructions)
+            try await engine.touchCachedPrefix(system: systemText(instructions: instructions, schema: schema), schema: schema)
         } catch is CancellationError {
             return
         } catch LanguageModelError.busy {
@@ -317,8 +330,12 @@ public final class MLXLanguageModel: LanguageModel {
             prefixMilliseconds: report.prefixMilliseconds,
             timeToFirstTokenMilliseconds: report.timeToFirstTokenMilliseconds,
             totalMilliseconds: report.totalMilliseconds, earlyTokens: report.earlyTokens,
-            earlySampledTokens: report.earlySampledTokens, speculation: report.speculation)
+            earlySampledTokens: report.earlySampledTokens, speculation: report.speculation,
+            leadChunkMilliseconds: report.leadChunkMilliseconds, leadChunkTokens: report.leadChunkTokens)
     }
+
+    /// Measurement only (`murmur-eval prefill-yield`): the background prompt chunk for the calls that follow.
+    public func setMeasurementBackgroundPromptChunk(_ tokens: Int) async { await engine.setMeasurementBackgroundPromptChunk(tokens) }
 
     /// Measurement only (`murmur-eval intent-run`): `system` and `prompt` are the chat turns verbatim
     /// (no schema block appended, no prompt profile), greedy. With `schema` nil the answer is decoded

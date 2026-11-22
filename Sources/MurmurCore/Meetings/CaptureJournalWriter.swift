@@ -81,6 +81,15 @@ public actor CaptureJournalWriter {
         return sealed
     }
 
+    /// One side on its own (an imported file's `file` side): appended and sealed at pauses exactly as the microphone
+    /// is, a tick's worth at a time. Returns the segments this call sealed.
+    public func append(_ stream: CaptureStream, _ samples: [Float]) throws -> [Sealed] {
+        guard !isAbandoned else { closeAllForAbandon(); return [] }
+        var sealed: [Sealed] = []
+        _ = try feed(stream, samples, cutLength: nil, follows: false, sealed: &sealed)
+        return sealed
+    }
+
     /// Feeds a side; returns the length (samples) of the segment it sealed, if it sealed one.
     private func feed(
         _ stream: CaptureStream, _ incoming: [Float], cutLength: Int?, follows: Bool, sealed: inout [Sealed]

@@ -75,7 +75,7 @@ struct MeetingsView: View {
             let id = note.id ?? 0
             let _ = model.meetings.revision
             if let state = LiveMeetingState.from(
-                model.recorder, jots: model.meetings.jots(noteId: id),
+                model.recorder, turns: model.meetings.liveTurns(noteId: id), jots: model.meetings.jots(noteId: id),
                 consent: try? model.store.consent(forNote: id), now: context.date) {
                 MeetingLiveView(state: state)
             }

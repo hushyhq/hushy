@@ -9,7 +9,9 @@ Headline (lower is better): invented owners, unsupported items, wrong-owner rate
   - invented owner: an action item's owner who is not a speaker label, "You", a group word,
     or a name said in the transcript.
   - unsupported item: an action item or decision whose content words are mostly absent from
-    every 80-word stretch of the transcript (support < SUPPORT_MIN).
+    every 80-word stretch of the transcript (support < SUPPORT_MIN). Words are compared as said:
+    digits read as number words ("12.50" as "twelve fifty", as AMI writes it) and an acronym AMI
+    spells letter by letter ("L_C_D_") as one word ("lcd").
   - wrong owner: a gold action matched by task whose owner is not the gold owner.
 Also: decision and action recall against the human gold, gold precision, invented numbers and
 dates (in the output, not in the transcript), key-point support, latency, calls, failures.
@@ -53,8 +55,33 @@ def stem(word: str) -> str:
     return word
 
 
+SPELLED = re.compile(r"\b(?:[a-z]_){2,}")
+
+
+UNITS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen \
+eighteen nineteen".split()
+TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def said(number: int) -> str:
+    """0 to 999 in words, as a speaker says it ("one hundred twenty five"); larger numbers stay digits."""
+    if number >= 1000:
+        return str(number)
+    hundreds, rest = divmod(number, 100)
+    words = [UNITS[hundreds], "hundred"] if hundreds else []
+    if rest or not words:
+        words += [UNITS[rest]] if rest < 20 else [TENS[rest // 10]] + ([UNITS[rest % 10]] if rest % 10 else [])
+    return " ".join(words)
+
+
+def tokens(text: str) -> list:
+    low = SPELLED.sub(lambda m: m.group(0).replace("_", ""), text.lower())
+    low = re.sub(r"\d+(?:,\d{3})*", lambda m: f" {said(int(m.group(0).replace(',', '')))} ", low)
+    return re.findall(r"[a-z0-9]+", low)
+
+
 def content(text: str) -> set:
-    return {stem(w) for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOP and len(w) > 1}
+    return {stem(w) for w in tokens(text) if w not in STOP and len(w) > 1}
 
 
 def similarity(gold: str, pred: str) -> float:
@@ -67,7 +94,7 @@ def similarity(gold: str, pred: str) -> float:
 
 
 def windows(transcript: str) -> list:
-    words = re.findall(r"[a-z0-9]+", transcript.lower())
+    words = tokens(transcript)
     return [{stem(w) for w in words[i:i + WINDOW]} for i in range(0, max(1, len(words) - STRIDE), STRIDE)]
 
 

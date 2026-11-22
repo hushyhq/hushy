@@ -49,7 +49,7 @@ extension MockMicHarness {
             var live = await typing.value
             live.microphoneHeard = rig.recorder.capture?.microphoneLastHeard != nil
             live.transcribedBeforeStop = rig.recorder.transcribedSeconds
-            live.liveTurns = rig.recorder.liveTurns.count
+            live.liveTurns = (try? rig.store.turnCount(noteId: noteID, origin: .capture)) ?? 0
             rig.recorder.stop()
             try await waitUntil("note ready", Self.readyTimeout) {
                 let status = try self.rig.store.note(id: noteID)?.status

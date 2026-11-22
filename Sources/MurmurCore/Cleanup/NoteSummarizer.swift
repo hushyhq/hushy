@@ -41,6 +41,9 @@ public enum NoteSummarizer {
         /// Apple FM's own time. It never cuts a call no dictation interrupted: that call has `callBudget`, whatever is
         /// left of this.
         public var dictationYieldLimit: Duration = .seconds(60)
+        /// Whether the summary text carries "- Decided: …" lines. Off for a meeting whose decisions are stored as
+        /// facts with their quotes (`MeetingFactExtractor`), so a reader never shows a decision twice.
+        public var decisionsInSummary = true
         /// Eval-only inspection hook: receives the merge input (piece notes). Nil in the app;
         /// transcript-derived text is never logged.
         public var trace: (@Sendable (String) -> Void)?
@@ -115,6 +118,7 @@ public enum NoteSummarizer {
         }
         let source = DigestGrounding.Source(transcript)
         digest.actionItems = NoteDigestMerge.naming(digest.actionItems, run.names).map { DigestGrounding.grounded($0, in: source) }
+        if !configuration.decisionsInSummary { digest.decisions = [] }
         return (NoteDigestMerge.output(digest, fallbackTitle: fallback.title), run.report)
     }
 

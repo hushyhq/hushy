@@ -6,7 +6,7 @@ import HushyModelsMLX
 import MurmurCore
 
 /// `murmur-eval release-paste --cases Evals/release-paste-takes.jsonl --mlx-model <dir> --out <jsonl>
-/// [--local-model <id>] [--rounds 3] [--voices Samantha,Daniel,Karen] [--speak-ms <n>]`
+/// [--local-model <id>] [--rounds 3] [--voices Samantha,Daniel,Karen] [--speak-ms <n>] [--between none|edits|edits+screen]`
 ///
 /// Key release to text, stage by stage, on the app's release path (`DictationController.process`) without the app:
 /// audio analysis (meter, gate, gain, speech evidence), the whole-recording recogniser pass (Ultra with the drift
@@ -16,6 +16,11 @@ import MurmurCore
 /// Each take is spoken by `say` (cached under `Evals/data/tts`, made before any model loads). Before its release the
 /// run waits as long as the take's audio, as the person would be speaking, and schedules the key-down warm the way
 /// the app does. Texts go only to `--out`; stdout has times and counts.
+///
+/// `--between edits`: before every take but the first, the same model answers a voice action (its prewarm and an
+/// extraction), a voice edit and a restyle, as a person may do between two dictations, so the take shows what those
+/// leave of the cleanup prefixes. `edits+screen` also asks for a summary of an invented page (a third prompt that is
+/// not cleanup's). `prefixBuilds` counts the prefixes the take's own cleanup calls had to build.
 enum ReleasePasteRunner {
     struct Take {
         let id: String
@@ -48,6 +53,12 @@ enum ReleasePasteRunner {
                                    registerLines: { entry.understandsRegisterLines }, secondOpinion: AppleFoundationModel())
         let warm = KeyDownWarmScheduler { await cleaner.warmOnKeyDown() }
         let pipeline = DictationPipeline(transcriber: NullTranscriber(), cleaner: cleaner, warmScheduler: warm)
+        let between = args.string("between") ?? "none"
+        guard ["none", "edits", "edits+screen"].contains(between) else {
+            throw EvalError.missing("--between none|edits|edits+screen")
+        }
+        try await chain.mlx.loadForMeasurement()
+        let weightBytes = await chain.mlx.memoryRegions()?.bytes ?? 0
         cleaner.prewarm(prefixesFor: .polished)
         await chain.model.prefixCache(instructions: SmartCleaner.cleanupInstructions(confidenceGuided: false))
         if cleaner.sendsRegisterLines {
@@ -58,7 +69,8 @@ enum ReleasePasteRunner {
         let vocabulary = settings(for: takes[0]).vocabulary
         // The app's boosting session is built while the person speaks; build it here before any take is timed.
         _ = try await engine.releaseStages(try AudioConverter().resampleAudioFile(audio[takes[0].id]!), vocabulary: vocabulary)
-        print("release-paste model=\(entry.id) takes=\(takes.count) rounds=\(rounds) vocabularyTerms=\(vocabulary.terms.count) load \(WaitLatencyRunner.loadAverage())")
+        print("release-paste model=\(entry.id) takes=\(takes.count) rounds=\(rounds) between=\(between) vocabularyTerms=\(vocabulary.terms.count) load \(WaitLatencyRunner.loadAverage())")
+        await printMemory("after cleanup prewarm", chain: chain, weightBytes: weightBytes)
 
         // `--boost ab`: every take is released twice per round, once with the CTC pass after the primary pass
         // (`sequential`, the order before 2026-11-07) and once alongside it, alternating which goes first.
@@ -72,11 +84,16 @@ enum ReleasePasteRunner {
                 let arms = boost == "ab" ? ((index + round) % 2 == 0 ? ["sequential", "alongside"] : ["alongside", "sequential"]) : [boost]
                 for arm in arms {
                     await engine.setBoostsAlongside(arm == "alongside")
+                    let afterEdits = between != "none" && !rows.isEmpty
+                    let betweenMs = afterEdits ? await editsBetweenTakes(model: chain.model, screen: between == "edits+screen") : 0
+                    if afterEdits, rows.count == 1 { await printMemory("after the first edits", chain: chain, weightBytes: weightBytes) }
                     warm.schedule()
                     try await Task.sleep(for: .milliseconds(speakMs))
                     var row = await release(take, samples: samples, engine: engine, pipeline: pipeline, warm: warm, chain: chain)
                     row["round"] = round
                     row["arm"] = arm
+                    row["afterEdits"] = afterEdits
+                    row["betweenMs"] = betweenMs
                     print("\(arm) " + summaryLine(row))
                     rows.append(row)
                 }
@@ -87,7 +104,41 @@ enum ReleasePasteRunner {
         }
         try (lines.joined(separator: "\n") + "\n").write(toFile: output, atomically: true, encoding: .utf8)
         print(report(rows))
+        if between != "none" { print("after edits:\n" + report(rows.filter { $0["afterEdits"] as? Bool == true })) }
+        let rebuilt = rows.filter { ($0["prefixBuilds"] as? Int ?? 0) > 0 }.count
+        print("takes whose cleanup built a prefix: \(rebuilt)/\(rows.count)")
+        await printMemory("at end", chain: chain, weightBytes: weightBytes)
         print("release-paste load at end \(WaitLatencyRunner.loadAverage()) output=\(output)")
+    }
+
+    /// A voice action, a voice edit and a restyle on `model` (and a screen summary when `screen`), with invented text;
+    /// returns how long they took.
+    private static func editsBetweenTakes(model: any LanguageModel, screen: Bool) async -> Int {
+        let start = ContinuousClock.now
+        let actions = ActionExtractor.explicit(model: model)
+        actions.prewarm()
+        _ = await actions.extract(
+            "remind me to call the dentist tomorrow at noon",
+            context: DateContext(now: Date(timeIntervalSince1970: 1_790_000_000), timeZone: TimeZone(identifier: "UTC") ?? .current))
+        _ = await VoiceEditor.edit(
+            VoiceEditRequest(selection: "The draft is ready for review, and the numbers are in the second tab.",
+                             instruction: "make it shorter"), model: model)
+        _ = await SelectionRestyler.restyle("hey, the draft is ready, take a look when you can", as: .professional, model: model)
+        if screen { _ = await ScreenSummarizer(model: model).summarize(inventedPage) }
+        return Int(ModelPace.ms(ContinuousClock.now - start).rounded())
+    }
+
+    /// An invented page, long enough for `ScreenSummarizer` (40 words or more).
+    private static let inventedPage = String(
+        repeating: "The planning group met on Tuesday to review the beta schedule, the open design questions and the budget. ",
+        count: 6)
+
+    /// The model's mapped bytes (weights and cached prefixes, `memoryRegions`) and MLX's allocator counters.
+    private static func printMemory(_ label: String, chain: LocalCleanupBackend.Chain, weightBytes: Int) async {
+        let total = await chain.mlx.memoryRegions()?.bytes ?? 0
+        let allocator = MLXLanguageModel.allocatorMemoryBytes
+        func mb(_ bytes: Int) -> String { String(format: "%.1f", Double(bytes) / 1_048_576) }
+        print("memory \(label): weights=\(mb(weightBytes))MB prefixes=\(mb(total - weightBytes))MB mlxActive=\(mb(allocator.active))MB mlxPeak=\(mb(allocator.peak))MB")
     }
 
     /// `--overlap-probe`: does the vocabulary model's CTC pass overlap the primary recogniser pass when both run at once
@@ -155,7 +206,9 @@ enum ReleasePasteRunner {
         await warm.beforeRealCall()
         let warmStopMs = lap()
         let callsBefore = chain.mlx.stats.successes
+        let buildsBefore = chain.mlx.stats.prefixBuilds
         let result = await pipeline.clean(raw, confidences: stages.result.confidences, settings: settings, released: released)
+        let prefixBuilds = chain.mlx.stats.prefixBuilds - buildsBefore
         let cleanupMs = lap()
         let total = Int(ModelPace.ms(ContinuousClock.now - released).rounded())
         let calls = chain.mlx.stats.successes - callsBefore
@@ -167,7 +220,7 @@ enum ReleasePasteRunner {
             "audioMs": samples.count / 16, "totalMs": total,
             "analysisMs": analysisMs, "asrMs": Int(stages.baseMs.rounded()), "boostMs": Int(stages.boostMs.rounded()),
             "recogniserMs": recogniserMs, "textMs": textMs, "warmStopMs": warmStopMs, "cleanupMs": cleanupMs,
-            "modelMs": modelMs, "callMs": callMs, "calls": calls,
+            "modelMs": modelMs, "callMs": callMs, "calls": calls, "prefixBuilds": prefixBuilds,
             "prefixBuildMs": timing.map { Int($0.prefixMilliseconds.rounded()) } as Any? ?? NSNull(),
             "ttftMs": timing.map { Int($0.timeToFirstTokenMilliseconds.rounded()) } as Any? ?? NSNull(),
             "lastCallMs": timing.map { Int($0.totalMilliseconds.rounded()) } as Any? ?? NSNull(),
@@ -224,7 +277,7 @@ enum ReleasePasteRunner {
 
     private static func summaryLine(_ row: [String: Any]) -> String {
         let keys = ["totalMs", "analysisMs", "asrMs", "boostMs", "textMs", "warmStopMs", "cleanupMs", "ttftMs", "lastCallMs",
-                    "sampledTokens", "calls"]
+                    "sampledTokens", "calls", "prefixBuilds"]
         return "\(row["id"] ?? "?") " + keys.map { "\($0)=\(row[$0].map { "\($0)" } ?? "-")" }.joined(separator: " ")
     }
 

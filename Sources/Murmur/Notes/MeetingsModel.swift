@@ -61,6 +61,7 @@ final class MeetingsModel {
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let reminders: any CalendarActionBackend
     @ObservationIgnored private let log = Logger(subsystem: "app.hushy", category: "meetings")
+    @ObservationIgnored private var live = LiveTurnReader()
 
     init(store: Store, settings: AppSettings, calendar: any CalendarReading, reminders: any CalendarActionBackend) {
         self.store = store
@@ -179,8 +180,11 @@ final class MeetingsModel {
         }
         let segments = (try? store.noteSegments(noteId: id)) ?? []
         let lines = MeetingLine.lines(from: segments)
+        // Rows from the note's facts, each at the moment its quote was said; a note with none falls back to its columns.
+        let facts = (try? store.facts(noteId: id)) ?? []
+        let rows = facts.isEmpty ? digest.rows(for: note) : FactDigest(facts: facts).rows(for: note)
         let page = MeetingPage.build(
-            rows: digest.rows(for: note), lines: lines, jots: (try? store.jots(noteId: id)) ?? [],
+            rows: rows, lines: lines, jots: (try? store.jots(noteId: id)) ?? [],
             doneIndexes: (try? store.doneActionItemIndexes(noteId: id)) ?? [], myNames: myNames)
         let consent = try? store.consent(forNote: id)
         let link = try? store.calendarLink(forNote: id)
@@ -206,6 +210,14 @@ final class MeetingsModel {
     }
 
     func jots(noteId: Int64) -> [MeetingJot] { (try? store.jots(noteId: noteId)) ?? [] }
+
+    /// The recording's turns as the live screen shows them, read from the store: only new rows each second.
+    func liveTurns(noteId: Int64) -> [NoteTurn] {
+        do { try live.refresh(noteId: noteId, store: store) } catch {
+            log.error("reading the live turns failed: \(error.localizedDescription)")
+        }
+        return live.turns
+    }
 
     func recordConsent(noteId: Int64, method: MeetingConsent.Method) {
         do {
@@ -255,7 +267,7 @@ final class MeetingsModel {
         let speakers = MeetingRecap.speakers(in: (try? store.noteSegments(noteId: id)) ?? [])
         guard let recap = MeetingRecap.make(
             from: note, turns: try? store.transcript(noteId: id), speakers: speakers, ownerName: settings.userName,
-            doneItems: (try? store.doneActionItemIndexes(noteId: id)) ?? [])
+            facts: try? store.facts(noteId: id))
         else {
             flash = "Nothing to send yet."
             return

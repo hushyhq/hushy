@@ -10,7 +10,8 @@ import Foundation
 /// - An open row with no file: a gap of its recorded length (`interrupted`).
 /// - A segment file with no row: a row is inserted after the side's last segment.
 /// - A note from before the journal (`chunk-0000.wav`, `chunk-0000-system.wav`, either `.enc`): each chunk is adopted
-///   as a sealed row (`format` `wav` or `wav.enc`) at its place on the note clock.
+///   as a sealed row (`format` `wav` or `wav.enc`) at its place on the note clock, on `legacyStream` (the microphone
+///   for a recording, `file` for an imported file).
 public enum CaptureJournalAdopter {
     public struct Outcome: Sendable, Equatable {
         public var sealed = 0
@@ -24,12 +25,14 @@ public enum CaptureJournalAdopter {
     public typealias LegacyReader = @Sendable (_ url: URL, _ key: SymmetricKey?) throws -> [Float]
 
     public static func adopt(
-        store: Store, noteId: Int64, folder: URL, key: SymmetricKey?, readLegacy: LegacyReader, now: Date = Date()
+        store: Store, noteId: Int64, folder: URL, key: SymmetricKey?, readLegacy: LegacyReader,
+        legacyStream: CaptureStream = .mic, now: Date = Date()
     ) throws -> Outcome {
         var outcome = Outcome()
         var journal = try store.captureJournal(noteId: noteId)
         if journal.segments.isEmpty {
-            outcome.legacy = try adoptLegacy(store: store, noteId: noteId, folder: folder, key: key, read: readLegacy, now: now)
+            outcome.legacy = try adoptLegacy(
+                store: store, noteId: noteId, folder: folder, key: key, read: readLegacy, stream: legacyStream, now: now)
             journal = try store.captureJournal(noteId: noteId)
         }
         for row in journal.segments where row.state == .open {
@@ -124,7 +127,7 @@ public enum CaptureJournalAdopter {
     /// Chunk files a build without the journal wrote, as sealed rows. The call side of chunk N starts where the
     /// microphone's chunk N does, as it was cut.
     private static func adoptLegacy(
-        store: Store, noteId: Int64, folder: URL, key: SymmetricKey?, read: LegacyReader, now: Date
+        store: Store, noteId: Int64, folder: URL, key: SymmetricKey?, read: LegacyReader, stream: CaptureStream, now: Date
     ) throws -> Int {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         let chunks = Set(names.compactMap(legacyIndex)).sorted()
@@ -137,7 +140,7 @@ public enum CaptureJournalAdopter {
             let encrypted = names.contains(mic + ".enc")
             let described = CaptureJournalWriter.describe(samples)
             let row = CaptureSegment(
-                noteId: noteId, stream: .mic, seq: index, kind: .audio, t0: t0, duration: duration, sampleCount: samples.count,
+                noteId: noteId, stream: stream, seq: index, kind: .audio, t0: t0, duration: duration, sampleCount: samples.count,
                 file: mic, format: encrypted ? .wavEncrypted : .wav, state: .sealed, speechRatio: described.speechRatio,
                 peak: described.peak, createdAt: now, updatedAt: now)
             if try store.insertSegment(row) != nil { adopted += 1 }
@@ -177,27 +180,21 @@ public enum CaptureSegmentAudio {
         }
     }
 
-    /// One side laid out on the note clock: each segment at its `t0`, gaps as zeros. What diarization reads, so its
-    /// times line up with the turns' word times.
+    /// One side laid out on the note clock: each segment at its `t0`, gaps as zeros (`CaptureTimeline`'s placement).
+    /// The whole side at once: for the legacy diarizer and voice matching only, which need it; diarization otherwise
+    /// reads `windows`.
     public static func timeline(
         _ journal: CaptureJournal, stream: CaptureStream, folder: URL, key: SymmetricKey?,
         readLegacy: CaptureJournalAdopter.LegacyReader
     ) throws -> [Float] {
-        let rate = CaptureJournalWriter.rate
+        var timeline = CaptureTimeline()
         var out: [Float] = []
         for segment in journal.audio(stream) where segment.state != .open {
             let samples = try samples(segment, folder: folder, key: key, readLegacy: readLegacy)
-            let start = Int((segment.t0 * rate).rounded())
-            if start > out.count { out += [Float](repeating: 0, count: start - out.count) }
-            if start < out.count {
-                // A rounding overlap of a few samples: write over it rather than shift everything after.
-                let overlap = out.count - start
-                out.replaceSubrange(start..<out.count, with: samples.prefix(overlap))
-                out += samples.dropFirst(overlap)
-            } else {
-                out += samples
-            }
+            timeline.place(samples, at: Int((segment.t0 * CaptureJournalWriter.rate).rounded()))
+            while let window = timeline.next() { out += window }
         }
+        while let window = timeline.next(final: true) { out += window }
         return out
     }
 }
